@@ -258,23 +258,40 @@ sequenceDiagram
     Note over D: GET now returns PROCESSED with processed_at ≈ created_at + 30s
 ```
 
-### 6.2 The hot-path SQL (one round-trip)
+### 6.2 The hot-path SQL: group commit (one round-trip per batch)
+
+With a cloud database every statement costs a network round-trip (measured: **~125 ms** from India to Supabase in Seoul). One insert per request would cap each connection at ~8 webhooks/s, and a burst of 50 would queue past 500 ms. So the handler doesn't write by itself. It hands the webhook to an **`IntakeBatcher`** (`app/intake.py`):
+
+* A few flusher tasks (`INTAKE_FLUSHERS`, default 4) each take **everything queued** (up to 500) and commit it in **one** multi-row statement.
+* Each request awaits its own future and gets its 202 **only after its row is committed**. The guarantee is unchanged; only the round-trips are shared.
+* A batch of 50 costs the same ~130 ms as a batch of 1.
 
 ```sql
-INSERT INTO transactions
-    (transaction_id, source_account, destination_account, amount, currency, payload_hash)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO transactions AS t
+    (transaction_id, source_account, destination_account, amount, currency,
+     payload_hash, webhook_count, payload_mismatch)
+SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::numeric[], $5::text[],
+                     $6::text[], $7::int[], $8::bool[])
 ON CONFLICT (transaction_id) DO UPDATE
-    SET webhook_count    = transactions.webhook_count + 1,
-        payload_mismatch = transactions.payload_mismatch
-                           OR transactions.payload_hash <> EXCLUDED.payload_hash,
+    SET webhook_count    = t.webhook_count + EXCLUDED.webhook_count,
+        payload_mismatch = t.payload_mismatch OR EXCLUDED.payload_mismatch
+                           OR t.payload_hash <> EXCLUDED.payload_hash,
         updated_at       = now()
-RETURNING (xmax = 0) AS inserted, status;
+RETURNING t.transaction_id, (t.xmax = 0) AS inserted, t.status, t.payload_hash;
 ```
 
 * `xmax = 0` is true only for a freshly inserted row → tells us *new* vs *duplicate* in the same statement.
 * Duplicates **never** touch `status`, `amount`, `processed_at` → first write wins, no reprocessing.
-* Wrapped in `asyncio.wait_for(..., timeout=0.4)` so a slow DB becomes a 503 rather than a breach of the 500 ms budget.
+* **Duplicates inside one batch** are folded in Python first (Postgres rejects `ON CONFLICT DO UPDATE` touching a row twice in one statement): one row with `webhook_count = n`; the first request is `duplicate:false`, the rest `true`; differing bodies set `payload_mismatch`.
+* Ids are **sorted** inside each batch so concurrent batches lock rows in the same order and can't deadlock.
+* The request waits at most `DB_WRITE_TIMEOUT_MS` (400 ms), then gets 503. If its batch commits after that anyway, that's the safe direction: the sender's retry is just a duplicate.
+
+### 6.2.1 Two latency traps found when testing against Supabase
+
+| Trap | Effect | Fix |
+|---|---|---|
+| asyncpg's default **connection reset on release** (`RESET ALL; UNLISTEN *; …`) | One extra round-trip per query, so every insert cost 2 RTT (250 ms) | Custom `reset` that only rolls back an abandoned transaction (we never set session state) |
+| **Lazy / idle-closed connections** | A new TLS connection to Seoul took ~930 ms, so the first webhook after startup or a quiet spell timed out | The whole API pool is opened and **primed** (hot statement prepared) at startup; idle connections are never closed; a keepalive re-warms every 60 s |
 
 ### 6.3 Duplicate webhooks
 
@@ -385,14 +402,22 @@ sequenceDiagram
 | Processing time leaking into the request | Request never awaits processing. It only sets an `asyncio.Event`. |
 | 30 s sleep blocking the server | `asyncio.sleep` yields the event loop, so thousands of sleeps cost ~nothing. **Never `time.sleep`.** |
 | Unbounded concurrency (memory, DB connections) | `WORKER_CONCURRENCY` (default 100) caps in-flight jobs. Excess rows simply wait in the table. |
-| DB connection churn | `asyncpg` pool (min 2, max 10) created at startup. The handler and the worker get separate pool budgets so a busy worker can't starve the handler. |
+| DB connection churn | `asyncpg` API pool (10) is fully opened and primed at startup and kept warm; the worker has its own pool (5) so a busy worker can't starve the handler. |
+| Round-trip latency to a cloud DB | **Group commit** (§6.2): concurrent webhooks share one INSERT round-trip. |
 | DB latency | DB in the **same region** as the app (e.g. both in `ap-south-1` / Mumbai). Cross-region adds ~100–250 ms per round-trip. |
 | Supabase pooler quirks | Using the **transaction pooler (port 6543)** means pgbouncer, which can't use prepared statements, so set `statement_cache_size=0` in asyncpg. Or use the session pooler / direct connection (5432). |
 | Slow DB / timeouts | `wait_for(insert, 0.4s)` → 503. Fail fast and let the processor retry. |
 | Cold starts on free hosting | Free tiers that sleep (Render free) take 30–60 s to wake, which blows the 500 ms budget. Use an always-on instance (Render Starter / Railway / Fly `min_machines_running=1`). |
 | Throughput math | With concurrency 100 and a 30 s delay: ~200 txn/min per instance. A burst of 1000 is accepted instantly (all 202), then finishes in ~5 min. Raise concurrency or add instances to scale; `SKIP LOCKED` makes that safe. |
 
-Expected latency: p50 ≈ 15–40 ms, p99 < 150 ms with the DB in the same region.
+Measured:
+
+| Setup | Result |
+|---|---|
+| Local Postgres, 2000 webhooks, ~4000 queued | 779 req/s, p99 171 ms, all 202 |
+| **Supabase (Seoul) from India, ~125 ms RTT**, 2000 webhooks at 50 concurrent | **all 202, p50 216 ms, p99 272 ms**, zero timeouts |
+
+With the app in Render Singapore (~70 ms RTT to Seoul), expect roughly half the Supabase numbers.
 
 ---
 
@@ -418,6 +443,8 @@ Expected latency: p50 ≈ 15–40 ms, p99 < 150 ms with the DB in the same regio
 | `LEASE_SECONDS` | `90` | Must be > delay + margin |
 | `MAX_ATTEMPTS` | `5` | Then `FAILED` |
 | `DB_WRITE_TIMEOUT_MS` | `400` | Hot-path insert budget, then 503 |
+| `INTAKE_FLUSHERS` / `INTAKE_MAX_BATCH` | `4` / `500` | Group-commit writers and max rows per batch |
+| `DB_API_POOL_SIZE` / `DB_WORKER_POOL_SIZE` | `10` / `5` | Connections per instance (Supabase free tier allows ~60 direct) |
 | `WEBHOOK_SECRET` | empty | Enables HMAC verification |
 | `SIMULATED_FAILURE_RATE` | `0.0` | 0–1, fault injection for demoing retries |
 | `LOG_LEVEL` | `INFO` | |
@@ -433,7 +460,8 @@ confluence/
 │   ├── config.py         # pydantic-settings
 │   ├── db.py             # asyncpg pool creation
 │   ├── schemas.py        # TransactionWebhook, TransactionOut, Health
-│   ├── repository.py     # all SQL: insert_or_touch, claim_batch, mark_processed, mark_retry_or_failed, get
+│   ├── intake.py         # IntakeBatcher: group commit for webhook inserts
+│   ├── repository.py     # all SQL: insert_batch, claim_batch, mark_processed, mark_retry_or_failed, get
 │   ├── worker.py         # Worker class: loop, semaphore, wake event, graceful shutdown
 │   ├── processor.py      # simulate_external_call (sleep + optional failure)
 │   └── security.py       # HMAC signature check

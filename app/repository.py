@@ -6,17 +6,21 @@ import asyncpg
 
 from app.schemas import TransactionWebhook
 
-INSERT_OR_TOUCH = """
-INSERT INTO transactions
-    (transaction_id, source_account, destination_account, amount, currency, payload_hash)
-VALUES ($1, $2, $3, $4, $5, $6)
+# Group commit: many webhooks in one round-trip. Ids are unique within a batch
+# (Postgres rejects ON CONFLICT DO UPDATE touching a row twice in one statement),
+# and sorted so concurrent batches lock rows in the same order (no deadlocks).
+INSERT_BATCH = """
+INSERT INTO transactions AS t
+    (transaction_id, source_account, destination_account, amount, currency,
+     payload_hash, webhook_count, payload_mismatch)
+SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::numeric[], $5::text[],
+                     $6::text[], $7::int[], $8::bool[])
 ON CONFLICT (transaction_id) DO UPDATE
-    SET webhook_count    = transactions.webhook_count + 1,
-        payload_mismatch = transactions.payload_mismatch
-                           OR transactions.payload_hash <> EXCLUDED.payload_hash,
+    SET webhook_count    = t.webhook_count + EXCLUDED.webhook_count,
+        payload_mismatch = t.payload_mismatch OR EXCLUDED.payload_mismatch
+                           OR t.payload_hash <> EXCLUDED.payload_hash,
         updated_at       = now()
-RETURNING (xmax = 0) AS inserted, status,
-          (transactions.payload_hash <> $6) AS mismatch
+RETURNING t.transaction_id, (t.xmax = 0) AS inserted, t.status, t.payload_hash
 """
 
 CLAIM_BATCH = """
@@ -81,18 +85,51 @@ class InsertResult:
     mismatch: bool
 
 
-async def insert_or_touch(pool: asyncpg.Pool, txn: TransactionWebhook) -> InsertResult:
+async def insert_batch(pool: asyncpg.Pool, txns: list[TransactionWebhook]) -> list[InsertResult]:
+    """Insert-or-touch many webhooks in one statement; one result per input, in order."""
+    hashes = [t.payload_hash() for t in txns]
+    unique: dict[str, dict] = {}
+    for t, h in zip(txns, hashes):
+        u = unique.get(t.transaction_id)
+        if u is None:
+            unique[t.transaction_id] = {"t": t, "hash": h, "count": 1, "mismatch": False}
+        else:
+            u["count"] += 1
+            u["mismatch"] |= h != u["hash"]
+    batch = [unique[k] for k in sorted(unique)]
+
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            INSERT_OR_TOUCH,
-            txn.transaction_id,
-            txn.source_account,
-            txn.destination_account,
-            txn.amount,
-            txn.currency,
-            txn.payload_hash(),
+        rows = await conn.fetch(
+            INSERT_BATCH,
+            [u["t"].transaction_id for u in batch],
+            [u["t"].source_account for u in batch],
+            [u["t"].destination_account for u in batch],
+            [u["t"].amount for u in batch],
+            [u["t"].currency for u in batch],
+            [u["hash"] for u in batch],
+            [u["count"] for u in batch],
+            [u["mismatch"] for u in batch],
         )
-    return InsertResult(inserted=row["inserted"], status=row["status"], mismatch=bool(row["mismatch"]))
+    by_id = {r["transaction_id"]: r for r in rows}
+
+    results, seen = [], set()
+    for t, h in zip(txns, hashes):
+        r = by_id[t.transaction_id]
+        first = t.transaction_id not in seen
+        seen.add(t.transaction_id)
+        results.append(
+            InsertResult(
+                inserted=bool(r["inserted"]) and first,  # later copies in the batch are duplicates
+                status=r["status"],
+                mismatch=h != r["payload_hash"],
+            )
+        )
+    return results
+
+
+async def prime_connection(conn: asyncpg.Connection) -> None:
+    """Prepare the hot-path statement ahead of the first webhook (saves a round-trip)."""
+    await conn.fetch(INSERT_BATCH, [], [], [], [], [], [], [], [])
 
 
 async def claim_batch(pool: asyncpg.Pool, worker_id: str, limit: int, lease_seconds: float) -> list[asyncpg.Record]:

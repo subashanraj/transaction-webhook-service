@@ -39,7 +39,7 @@ Run all the success criteria in one go (single, duplicates, concurrent duplicate
 python scripts/load_test.py --base $BASE --count 2000 --concurrency 50
 ```
 
-Measured locally: **2000 webhooks at 779 req/s, all 202, p99 171 ms**, with ~4000 transactions already queued. A hard kill (`taskkill /F`) with 100 jobs in flight lost nothing: all 100 were re-claimed after lease expiry and finished `PROCESSED`.
+Measured **against the real Supabase database** (Seoul, ~125 ms round-trip from India): **2000 webhooks, all 202, p99 272 ms, zero timeouts**. Against local Postgres: 779 req/s, p99 171 ms. A hard kill (`taskkill /F`) with 100 jobs in flight lost nothing: all 100 were re-claimed after lease expiry and finished `PROCESSED`.
 
 ---
 
@@ -72,13 +72,13 @@ export TEST_DATABASE_URL=postgresql://postgres@localhost:5432/webhooks_test
 pytest -v
 ```
 
-**51 tests** cover validation, idempotency (sequential, concurrent, after processed, after failed, conflicting payload), end-to-end processing, crash recovery via lease expiry, retries → `FAILED`, DB down → 503, graceful shutdown, two instances sharing one DB, HMAC signatures, and latency under load (p99 ≈ 85 ms locally with 300 jobs in flight).
+**52 tests** cover validation, idempotency (sequential, concurrent, after processed, after failed, conflicting payload), end-to-end processing, crash recovery via lease expiry, retries → `FAILED`, DB down → 503, graceful shutdown, two instances sharing one DB, HMAC signatures, and latency under load (p99 ≈ 85 ms locally with 300 jobs in flight).
 
 ## Deploy (Render + Supabase)
 
 1. Create a Supabase project. Copy the **Session pooler** connection string (Dashboard → Connect). The direct `db.<ref>.supabase.co` host is IPv6-only, which Render can't reach.
 2. Push this repo to GitHub. In Render: **New → Blueprint** → select the repo (uses `render.yaml`), or New Web Service → Docker.
-3. Set `DATABASE_URL`. Use an **always-on** instance: free instances sleep, and the first request then takes 30–60 s, which breaks the 500 ms requirement.
+3. Set `DATABASE_URL`. Percent-encode special characters in the password (`@` → `%40`). Use an **always-on** instance: free instances sleep, and the first request then takes 30–60 s, which breaks the 500 ms requirement.
 4. Run `./scripts/smoke_test.sh https://<service>.onrender.com`.
 
 ---
@@ -88,6 +88,8 @@ pytest -v
 **FastAPI + asyncpg.** Async end-to-end, so the 30 s simulated call (`asyncio.sleep`) costs nothing while it waits, and thousands can be in flight without slowing the webhook endpoint. asyncpg is the fastest Postgres driver for Python.
 
 **Persist first, acknowledge second, process later.** The webhook handler does one thing: a single idempotent `INSERT … ON CONFLICT` in one round-trip, then returns 202. It never awaits processing. If the row can't be committed within 400 ms, it returns **503**, never 202, so the processor retries rather than us losing a transaction we claimed to have.
+
+**Group commit for a remote database.** Every statement to a cloud DB costs a network round-trip (~125 ms here), so one INSERT per request falls over under bursts. Webhooks that arrive together are committed in **one** multi-row `INSERT … ON CONFLICT`, and each request still gets its 202 only after its own row is committed. A batch of 50 costs the same ~130 ms as a batch of 1. The connection pool is opened and primed at startup and kept warm, because a fresh TLS connection takes ~1 s. asyncpg's per-release session reset is disabled, because it was a second round-trip on every query.
 
 **Postgres (Supabase) is both the store and the queue.** Inserting the row *is* enqueuing it, so there is no dual write (DB + Redis/SQS) that can half-fail. A background worker in the same process claims rows with `FOR UPDATE SKIP LOCKED` and a **time-limited lease**:
 - Many workers or instances can run safely, because each row is claimed by exactly one.
@@ -121,7 +123,8 @@ See [.env.example](.env.example). Key settings: `DATABASE_URL`, `PROCESSING_DELA
 ## Project layout
 
 ```
-app/main.py         routes + lifespan (pools, migrations, worker)
+app/main.py         routes + lifespan (pools, migrations, warm-up, batcher, worker)
+app/intake.py       group commit for webhook inserts
 app/worker.py       lease-based background worker
 app/repository.py   all SQL
 app/schemas.py      request validation and response shapes

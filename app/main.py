@@ -13,7 +13,8 @@ from pydantic import ValidationError
 
 from app import repository as repo
 from app.config import Settings, get_settings
-from app.db import create_pool, run_migrations
+from app.db import create_pool, keep_warm, run_migrations, warm_pool
+from app.intake import IntakeBatcher
 from app.processor import simulate_external_call
 from app.schemas import Health, TransactionOut, TransactionWebhook, WebhookAck, iso_utc
 from app.security import verify_signature
@@ -45,6 +46,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await run_migrations(app.state.api_pool)
             except Exception:
                 log.exception("migration failed at startup (is the database reachable?)")
+        # Open (and prepare) the webhook path's connections before taking traffic.
+        warm = settings.db_api_pool_size
+        try:
+            await asyncio.wait_for(warm_pool(app.state.api_pool, warm, repo.prime_connection), timeout=15)
+            log.info("DB pool warmed with %d connections", warm)
+        except Exception as e:
+            log.warning("could not warm DB pool at startup: %s: %s", type(e).__name__, e)
+        keepalive = asyncio.create_task(
+            keep_warm(app.state.api_pool, warm, settings.db_keepalive_seconds, repo.prime_connection)
+        )
+        app.state.intake = IntakeBatcher(app.state.api_pool, settings.intake_flushers, settings.intake_max_batch)
+        await app.state.intake.start()
         processor = partial(
             simulate_external_call,
             delay_seconds=settings.processing_delay_seconds,
@@ -55,6 +68,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            keepalive.cancel()
+            await app.state.intake.stop()
             await app.state.worker.stop()
             await app.state.api_pool.close()
             await app.state.worker_pool.close()
@@ -140,7 +155,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # If that can't be done quickly, answer 503 so the processor retries; never 202.
         try:
             result = await asyncio.wait_for(
-                repo.insert_or_touch(request.app.state.api_pool, txn),
+                request.app.state.intake.submit(txn),
                 timeout=settings.db_write_timeout_ms / 1000,
             )
         except Exception as e:

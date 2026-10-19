@@ -66,6 +66,16 @@ async def test_same_id_different_payload_keeps_original(client, db):  # S19
     assert row["attempts"] == 1
 
 
+async def test_conflicting_payloads_in_same_batch(client, db):
+    # Sent together, these are committed in one group-commit batch.
+    rs = await asyncio.gather(*(client.post(URL, json=payload("txn_batch_mix", amount=a)) for a in (10, 20, 10, 30)))
+    assert [r.status_code for r in rs] == [202] * 4
+    assert sum(not r.json()["duplicate"] for r in rs) == 1
+    row = await db.fetchrow("SELECT * FROM transactions WHERE transaction_id='txn_batch_mix'")
+    assert row["webhook_count"] == 4
+    assert row["payload_mismatch"] is True
+
+
 async def test_identical_resend_is_not_flagged_as_mismatch(client, db):
     await client.post(URL, json=payload("txn_same", amount=150.5))
     await client.post(URL, json=payload("txn_same", amount=150.50, currency="inr"))

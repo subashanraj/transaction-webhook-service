@@ -13,7 +13,12 @@ class Settings(BaseSettings):
     # asyncpg prepared-statement cache; must be 0 behind pgbouncer (Supabase port 6543)
     db_statement_cache_size: int = 100
     db_api_pool_size: int = 10
-    db_worker_pool_size: int = 3
+    db_worker_pool_size: int = 5
+    db_keepalive_seconds: float = 60.0
+    # Group commit for webhook inserts: N concurrent writers, each committing
+    # whatever has queued up (≤ max) in one round-trip.
+    intake_flushers: int = 4
+    intake_max_batch: int = 500
     db_write_timeout_ms: int = 400
     auto_migrate: bool = True
 
@@ -40,6 +45,8 @@ class Settings(BaseSettings):
             raise ValueError("SIMULATED_FAILURE_RATE must be between 0 and 1")
         if self.worker_concurrency < 1 or self.max_attempts < 1:
             raise ValueError("WORKER_CONCURRENCY and MAX_ATTEMPTS must be >= 1")
+        if not 1 <= self.intake_flushers <= self.db_api_pool_size:
+            raise ValueError("INTAKE_FLUSHERS must be between 1 and DB_API_POOL_SIZE")
         return self
 
 
