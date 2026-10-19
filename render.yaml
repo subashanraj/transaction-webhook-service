@@ -1,0 +1,18 @@
+# Render blueprint: New > Blueprint > pick this repo.
+services:
+  - type: web
+    name: transaction-webhooks
+    runtime: docker
+    plan: starter            # always-on; the free plan sleeps and breaks the 500 ms rule
+    region: singapore        # closest Render region to the Supabase DB (Seoul, ap-northeast-2)
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false          # Supabase SESSION POOLER URL (direct db.* host is IPv6-only)
+      - key: PROCESSING_DELAY_SECONDS
+        value: "30"
+      - key: WORKER_CONCURRENCY
+        value: "100"
+      - key: LOG_LEVEL
+        value: INFO
