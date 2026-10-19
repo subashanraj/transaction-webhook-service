@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How It Works</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --border: #dfe3e8; --text: #1b1f24; --muted: #667080;
+    --accent: #2f6fed; --accent-text: #ffffff; --accent-soft: #e8efff;
+    --ok: #18794e; --ok-bg: #e6f4ec; --warn: #a15c00; --warn-bg: #fdf1dc;
+    --err: #c62a2f; --err-bg: #fde8e8; --idle: #59636e; --idle-bg: #eef0f3; --line: #c5cbd3;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    --t0: #2f6fed; --t1: #8a4fd8; --t2: #0f8a8a; --t3: #c2410c; --t4: #be185d; --t5: #4d7c0f; --t6: #0369a1; --t7: #7c5c00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --border: #2a3039; --text: #e6e9ee; --muted: #8b95a3;
+      --accent: #5b8cff; --accent-text: #0b0e12; --accent-soft: #1a2540;
+      --ok: #4cc38a; --ok-bg: #12301f; --warn: #f0b04a; --warn-bg: #33270f;
+      --err: #ff6b6b; --err-bg: #3a1618; --idle: #a3acb8; --idle-bg: #232932; --line: #3a424d;
+      --t0: #5b8cff; --t1: #a678f0; --t2: #2bb5b5; --t3: #f07a3c; --t4: #f0609e; --t5: #84c23a; --t6: #3aa5e0; --t7: #d6a92a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 14px 24px;
+           border-bottom: 1px solid var(--border); background: var(--panel); }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  header a { color: var(--accent); text-decoration: none; font-size: 13px; }
+  main { max-width: 1440px; margin: 0 auto; padding: 18px 24px 40px; }
+  .layout { display: grid; grid-template-columns: 250px 1fr; gap: 18px; align-items: start; }
+  .layout > * { min-width: 0; }
+  @media (max-width: 980px) {
+    .layout { grid-template-columns: 1fr; }
+    .scen { display: flex; gap: 4px; overflow-x: auto; }
+    .scen li { flex: 0 0 auto; }
+    .scen button { width: auto; padding: 7px 10px; }
+    .scen small { display: none; }
+  }
+
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+  .scen { list-style: none; margin: 0; padding: 6px; }
+  .scen button { display: block; width: 100%; text-align: left; border: 0; background: transparent; color: var(--text);
+                 font: inherit; padding: 9px 10px; border-radius: 8px; cursor: pointer; }
+  .scen button:hover { background: var(--idle-bg); }
+  .scen button.on { background: var(--accent-soft); }
+  .scen b { display: block; font-weight: 600; font-size: 13.5px; }
+  .scen small { color: var(--muted); font-size: 12px; }
+  .scen .n { display: inline-block; width: 20px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .controls h2 { margin: 0 auto 0 0; font-size: 15px; font-weight: 640; }
+  .btn { font: inherit; font-size: 13px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg);
+         color: var(--text); padding: 6px 11px; cursor: pointer; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+  .seg button { font: inherit; font-size: 12.5px; border: 0; background: var(--bg); color: var(--text); padding: 6px 9px; cursor: pointer; }
+  .seg button.on { background: var(--accent); color: var(--accent-text); }
+  .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+
+  /* ---------- stage ---------- */
+  .stagewrap { position: relative; overflow: hidden; }
+  .stage { position: absolute; left: 0; top: 0; width: 1000px; height: 560px; transform-origin: 0 0; }
+  .stage svg { position: absolute; inset: 0; }
+  .wire { stroke: var(--line); stroke-width: 2; fill: none; }
+  .wire.dash { stroke-dasharray: 5 5; }
+  .wlabel { fill: var(--muted); font-size: 11px; }
+  .box { position: absolute; background: var(--panel); border: 1.5px solid var(--border); border-radius: 12px; padding: 10px 12px;
+         transition: border-color .25s, box-shadow .25s, opacity .25s; }
+  .box h3 { margin: 0; font-size: 13px; font-weight: 650; }
+  .box .what { color: var(--muted); font-size: 11.5px; line-height: 1.35; margin-top: 2px; }
+  .box.active { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+  .box.bad { border-color: var(--err); box-shadow: 0 0 0 4px var(--err-bg); }
+  .box.down { opacity: .45; border-style: dashed; }
+  .box .badge { position: absolute; right: 10px; top: 9px; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+  .badge.err { background: var(--err-bg); color: var(--err); }
+  .badge.ok { background: var(--ok-bg); color: var(--ok); }
+
+  table.db { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  table.db th { text-align: left; color: var(--muted); font-weight: 560; padding: 3px 4px; border-bottom: 1px solid var(--border); }
+  table.db td { padding: 4px 4px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  table.db td.id { font-family: var(--mono); }
+  table.db tr.flash td { animation: flash 1.1s ease-out; }
+  table.db tr.warnflash td { animation: warnflash 1.4s ease-out; }
+  @keyframes flash { from { background: var(--ok-bg); } to { background: transparent; } }
+  @keyframes warnflash { from { background: var(--warn-bg); } to { background: transparent; } }
+  .dbempty { color: var(--muted); font-size: 12px; margin-top: 10px; }
+
+  .pill { display: inline-block; font-size: 10.5px; font-weight: 650; padding: 0 6px; border-radius: 999px; }
+  .p-PROCESSING { background: var(--warn-bg); color: var(--warn); }
+  .p-PROCESSED { background: var(--ok-bg); color: var(--ok); }
+  .p-FAILED { background: var(--err-bg); color: var(--err); }
+  .note { color: var(--muted); font-size: 10.5px; }
+  table.db { table-layout: fixed; }
+  table.db th:nth-child(1) { width: 30%; } table.db th:nth-child(2) { width: 27%; }
+  table.db th:nth-child(3) { width: 11%; } table.db th:nth-child(4) { width: 9%; }
+  table.db td { overflow: hidden; text-overflow: ellipsis; }
+  table.db td.note { white-space: normal; line-height: 1.25; }
+  .tag { font-size: 10px; padding: 0 5px; border-radius: 4px; background: var(--warn-bg); color: var(--warn); margin-left: 4px; }
+
+  .slot { display: grid; grid-template-columns: 62px 1fr; gap: 8px; align-items: center; margin-top: 6px; font-size: 11.5px; }
+  .slot .who { color: var(--muted); }
+  .slot .job { height: 22px; border-radius: 6px; background: var(--idle-bg); position: relative; overflow: hidden; }
+  .slot .job i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--warn-bg); transition: width .1s linear; }
+  .slot .job span { position: relative; padding: 0 7px; line-height: 22px; font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+  .slot.dead .job { background: var(--err-bg); }
+  .slot.dead .who { color: var(--err); }
+
+  .pkt { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); padding: 2px 9px; border-radius: 999px;
+         font: 600 11px/18px var(--mono); color: #fff; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,.18); z-index: 5;
+         transition: opacity .25s; pointer-events: none; }
+  .pkt.resp-ok { background: var(--ok); } .pkt.resp-warn { background: var(--warn); } .pkt.resp-err { background: var(--err); }
+  .pkt.sql { background: var(--text); color: var(--panel); border-radius: 6px; }
+  .pkt.fade { opacity: 0; }
+  .t0 { background: var(--t0); } .t1 { background: var(--t1); } .t2 { background: var(--t2); } .t3 { background: var(--t3); }
+  .t4 { background: var(--t4); } .t5 { background: var(--t5); } .t6 { background: var(--t6); } .t7 { background: var(--t7); }
+  .boom { position: absolute; transform: translate(-50%, -50%); font-size: 26px; z-index: 6; pointer-events: none; }
+  .clock { position: absolute; right: 14px; top: 10px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* ---------- narration ---------- */
+  .narr { display: grid; grid-template-columns: 1fr 320px; border-top: 1px solid var(--border); }
+  @media (max-width: 1100px) { .narr { grid-template-columns: 1fr; } }
+  .caption { padding: 14px 18px; min-height: 96px; }
+  .caption .step { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .caption p { margin: 4px 0 0; font-size: 15px; line-height: 1.5; }
+  .caption code, .facts code { font-family: var(--mono); font-size: .92em; background: var(--idle-bg); padding: 0 4px; border-radius: 4px; }
+  .facts { padding: 14px 18px; border-left: 1px solid var(--border); font-size: 13px; }
+  @media (max-width: 1100px) { .facts { border-left: 0; border-top: 1px solid var(--border); } }
+  .facts h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .facts ul { margin: 0 0 12px; padding-left: 18px; } .facts li { margin: 2px 0; }
+  .facts blockquote { margin: 0 0 12px; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 6px 6px 0; }
+  .facts .proof { color: var(--muted); font-size: 12px; }
+  .story { padding: 0 18px 14px; }
+  .story ol { margin: 0; padding-left: 20px; color: var(--muted); font-size: 12.5px; max-height: 160px; overflow: auto; }
+  .story li.cur { color: var(--text); }
+
+  .real { margin-top: 18px; }
+  .real .head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .real .head h2 { margin: 0 auto 0 0; font-size: 14px; font-weight: 640; }
+  .real .head .muted { color: var(--muted); font-size: 12.5px; }
+  .reallog { list-style: none; margin: 0; padding: 0; font-size: 12.5px; max-height: 280px; overflow: auto; }
+  .reallog li { padding: 6px 14px; border-top: 1px solid var(--border); font-family: var(--mono); font-size: 12px; word-break: break-word; }
+  .reallog li:first-child { border-top: 0; }
+  .reallog li.h { font-family: inherit; font-weight: 600; background: var(--idle-bg); }
+  .reallog .c2 { color: var(--ok); } .reallog .c4 { color: var(--warn); } .reallog .c5 { color: var(--err); }
+  .reallog .empty { color: var(--muted); font-family: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>How the webhook service works</h1>
+    <div class="sub">Animated walkthrough: what happens to each request, and why it is safe</div>
+  </div>
+  <div class="spacer"></div>
+  <a href="/dashboard">Live dashboard</a>
+  <a href="/docs" target="_blank" rel="noopener">API docs ↗</a>
+</header>
+
+<main>
+  <div class="layout">
+    <nav class="panel" aria-label="Scenarios"><ul class="scen" id="scenlist"></ul></nav>
+
+    <div>
+      <section class="panel">
+        <div class="controls">
+          <h2 id="scen-title">Scenario</h2>
+          <button class="btn primary" id="play">▶ Play</button>
+          <button class="btn" id="next" title="Next step (→ or Space)">Next step ▸</button>
+          <button class="btn" id="restart">↺ Restart</button>
+          <label class="toggle"><input type="checkbox" id="stepmode"> step by step</label>
+          <div class="seg" id="speed" aria-label="Speed">
+            <button data-v="0.5">0.5×</button><button data-v="1" class="on">1×</button><button data-v="2">2×</button>
+          </div>
+        </div>
+
+        <div class="stagewrap" id="stagewrap">
+          <div class="stage" id="stage">
+            <svg viewBox="0 0 1000 560" width="1000" height="560" aria-hidden="true">
+              <path class="wire" d="M170 265 H230"/><path class="wire" d="M390 265 H450"/><path class="wire" d="M610 265 H670"/>
+              <path class="wire dash" d="M310 320 V345 H95 V320"/>
+              <text class="wlabel" x="150" y="361">HTTP response (202 / 422 / 503)</text>
+              <path class="wire" d="M825 330 V372"/>
+              <text class="wlabel" x="834" y="356">claim · finalize</text>
+              <text class="wlabel" x="183" y="256">POST</text>
+              <text class="wlabel" x="618" y="256">INSERT</text>
+            </svg>
+
+            <div class="box" id="b-proc" style="left:20px;top:140px;width:150px;height:180px">
+              <h3>Payment processor</h3><div class="what">e.g. Razorpay. Sends webhooks; <b>retries</b> if it doesn't get a 2xx.</div>
+            </div>
+            <div class="box" id="b-api" style="left:230px;top:140px;width:160px;height:180px">
+              <h3>Webhook API</h3><div class="what"><code style="font-size:10.5px">POST /v1/webhooks/transactions</code><br>validate → hand to group commit → answer</div>
+            </div>
+            <div class="box" id="b-intake" style="left:450px;top:140px;width:160px;height:180px">
+              <h3>Group commit</h3><div class="what">Webhooks arriving together share <b>one</b> INSERT round-trip</div>
+            </div>
+            <div class="box" id="b-db" style="left:670px;top:30px;width:310px;height:300px">
+              <h3>Postgres · <code style="font-size:11px">transactions</code></h3>
+              <div class="what"><code style="font-size:10.5px">transaction_id</code> = PRIMARY KEY · the table is also the queue</div>
+              <div id="dbbody"></div>
+            </div>
+            <div class="box" id="b-worker" style="left:670px;top:372px;width:310px;height:170px">
+              <h3>Background worker</h3><div class="what">claims rows with a lease · runs the 30 s call</div>
+              <div id="slots"></div>
+            </div>
+            <div class="clock" id="clock"></div>
+          </div>
+        </div>
+
+        <div class="narr">
+          <div>
+            <div class="caption" aria-live="polite"><div class="step" id="cap-step">Ready</div><p id="cap-text">Pick a scenario on the left and press <b>Play</b>, or turn on <b>step by step</b> to present it one step at a time.</p></div>
+            <div class="story"><ol id="story"></ol></div>
+          </div>
+          <aside class="facts" id="facts"></aside>
+        </div>
+      </section>
+
+      <section class="panel real">
+        <div class="head">
+          <h2>Run it for real</h2>
+          <span class="muted" id="real-note">Sends the same requests to this server and shows the actual responses.</span>
+          <button class="btn primary" id="realrun">Run against the API</button>
+        </div>
+        <ul class="reallog" id="reallog"><li class="empty">Real responses appear here.</li></ul>
+      </section>
+    </div>
+  </div>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const stage = $("stage");
+
+  // ---------------- engine: cancellable, pausable, speed-aware ----------------
+  const S = { speed: 1, paused: true, step: false, run: 0, next: null, stepNo: 0, pendingNext: false };
+  class Cancel extends Error {}
+  const check = (run) => { if (run !== S.run) throw new Cancel(); };
+  const frame = () => new Promise((r) => requestAnimationFrame(r));
+  async function tween(run, ms, fn) {
+    let t = 0, last = performance.now();
+    for (;;) {
+      await frame(); check(run);
+      const now = performance.now();
+      if (!S.paused) t += (now - last) * S.speed;
+      last = now;
+      const k = Math.min(1, t / ms);
+      fn(k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2);
+      if (k >= 1) return;
+    }
+  }
+  const wait = (run, ms) => tween(run, ms, () => {});
+  const all = (...ps) => Promise.all(ps);
+
+  // A narrated step: show the caption, run its animation, then pause for reading
+  // (or, in step-by-step mode, until the presenter clicks Next).
+  async function step(run, text, anim) {
+    S.stepNo += 1;
+    $("cap-step").textContent = `Step ${S.stepNo}`;
+    $("cap-text").innerHTML = text;
+    const li = document.createElement("li"); li.innerHTML = text;
+    $("story").querySelectorAll("li.cur").forEach((x) => x.classList.remove("cur"));
+    li.classList.add("cur"); $("story").appendChild(li);
+    $("story").scrollTop = $("story").scrollHeight;  // scroll the list only, never the page
+    const t0 = performance.now();
+    if (anim) await anim();
+    check(run);
+    if (S.step) {
+      if (S.pendingNext) { S.pendingNext = false; return; }   // Next was clicked during the animation
+      await new Promise((res) => (S.next = res)); S.next = null; check(run);
+    } else {
+      const read = Math.min(5200, Math.max(1500, text.replace(/<[^>]+>/g, "").length * 38));
+      const spent = (performance.now() - t0) * S.speed;
+      await wait(run, Math.max(500, read - spent));
+    }
+  }
+
+  // ---------------- stage helpers ----------------
+  const P = { proc: [95, 265], api: [310, 265], intake: [530, 265], db: [700, 265] };
+  const grid = (cx, i) => [cx + (i % 2 ? 32 : -32), 234 + Math.floor(i / 2) * 23];
+  function pkt(label, cls, [x, y]) {
+    const el = document.createElement("div");
+    el.className = "pkt " + cls; el.textContent = label; stage.appendChild(el);
+    const p = { el, x, y }; place(p, x, y); return p;
+  }
+  function place(p, x, y) { p.x = x; p.y = y; p.el.style.left = x + "px"; p.el.style.top = y + "px"; }
+  async function move(run, p, [x, y], ms = 750) {
+    const x0 = p.x, y0 = p.y;
+    await tween(run, ms, (k) => place(p, x0 + (x - x0) * k, y0 + (y - y0) * k));
+  }
+  async function path(run, p, points, ms = 400) { for (const pt of points) await move(run, p, pt, ms); }
+  async function fadeOut(run, p) { p.el.classList.add("fade"); await wait(run, 250); p.el.remove(); }
+  const RESP_PATH = (y = 0) => [[310, 345 + y], [95, 345 + y], [95, 320]];
+  async function respond(run, label, kind, dy = 0) {
+    const r = pkt(label, "resp-" + kind, [310, 320]);
+    await path(run, r, RESP_PATH(dy), 420);
+    await wait(run, 350); await fadeOut(run, r);
+  }
+  function active(id, on = true) { $(id).classList.toggle("active", on); }
+  async function flash(run, id, ms = 600) { active(id); await wait(run, ms); active(id, false); }
+  function boom([x, y], emoji = "💥") { const b = document.createElement("div"); b.className = "boom"; b.textContent = emoji; b.style.left = x + "px"; b.style.top = y + "px"; stage.appendChild(b); return b; }
+  const clock = (t) => ($("clock").textContent = t || "");
+
+  // ---- database model ----
+  let rows = new Map();
+  function dbSet(id, patch, fx = "flash") {
+    rows.set(id, { ...(rows.get(id) || { status: "PROCESSING", deliveries: 0, attempts: 0, note: "", amount: 0 }), ...patch });
+    renderDb(id, fx);
+  }
+  function renderDb(changed, fx) {
+    const body = $("dbbody");
+    if (!rows.size) { body.innerHTML = `<div class="dbempty">empty</div>`; return; }
+    body.innerHTML = `<table class="db"><thead><tr><th>transaction_id</th><th>status</th><th title="webhook deliveries received">deliv.</th><th>att.</th><th>info</th></tr></thead><tbody>${
+      [...rows.entries()].slice(-8).map(([id, r]) => `<tr class="${id === changed ? fx : ""}">
+        <td class="id" title="${esc(id)}">${esc(id)}</td>
+        <td><span class="pill p-${r.status}">${r.status}</span></td>
+        <td>${r.deliveries}</td><td>${r.attempts}</td><td class="note">${r.mismatch ? '<span class="tag">mismatch</span> ' : ""}${r.note || ""}</td></tr>`).join("")
+    }</tbody></table>`;
+  }
+
+  // ---- worker model ----
+  let slots = [];
+  function setSlots(n, names) { slots = Array.from({ length: n }, (_, i) => ({ who: names?.[i] || `slot ${i + 1}`, id: null, pct: 0, dead: false, label: "" })); renderSlots(); }
+  function renderSlots() {
+    $("slots").innerHTML = slots.map((s) => `<div class="slot ${s.dead ? "dead" : ""}"><span class="who">${esc(s.who)}</span>
+      <div class="job"><i style="width:${s.pct}%"></i><span>${s.dead ? "💥 crashed" : s.id ? esc(s.id) + (s.label ? " · " + esc(s.label) : "") : '<span class="note">idle</span>'}</span></div></div>`).join("");
+  }
+  async function runJob(run, i, id, ms, label = "30 s call") {
+    slots[i] = { ...slots[i], id, pct: 0, label }; renderSlots();
+    await tween(run, ms, (k) => { slots[i].pct = k * 100; renderSlots(); });
+  }
+  function freeSlot(i) { slots[i] = { ...slots[i], id: null, pct: 0, label: "" }; renderSlots(); }
+
+  function resetStage() {
+    stage.querySelectorAll(".pkt, .boom").forEach((e) => e.remove());
+    ["b-proc", "b-api", "b-intake", "b-db", "b-worker"].forEach((id) => { $(id).classList.remove("active", "bad", "down"); $(id).querySelector(".badge")?.remove(); });
+    rows = new Map(); renderDb(); setSlots(1, ["worker-1"]); clock("");
+    $("story").innerHTML = ""; S.stepNo = 0;
+  }
+  function badge(id, text, kind) { $(id).querySelector(".badge")?.remove(); const b = document.createElement("span"); b.className = "badge " + kind; b.textContent = text; $(id).appendChild(b); }
+
+  // Common path for one valid webhook up to the DB commit.
+  async function arrive(run, p, ms = 650) { await move(run, p, [P.api[0], P.api[1]], ms); }
+  async function toIntake(run, p, dy = 0, ms = 500) { await move(run, p, [P.intake[0], P.intake[1] + dy], ms); }
+
+  // ---------------- scenarios ----------------
+  const SCEN = [
+    {
+      key: "single", title: "One webhook", sub: "202 first, process later",
+      facts: {
+        proves: ["The response never waits for processing", "<code>202</code> is sent only <b>after</b> the row is committed", "Processing survives restarts because the job lives in the DB, not in memory"],
+        line: "“We persist first, acknowledge second, process later. The insert <i>is</i> the enqueue, so there's no gap where a transaction is acknowledged but not saved.”",
+        proof: "tests/test_processing.py::test_single_transaction_end_to_end",
+      },
+      real: async (log) => {
+        const id = rid("single");
+        const r = await post(body(id)); log(r);
+        const g = await get(id); logGet(log, g);
+        log.note("It is processed in the background. Check it on the dashboard, or GET it again in ~30 s.");
+      },
+      async play(run) {
+        setSlots(1, ["worker-1"]);
+        const p = pkt("txn_A", "t0", P.proc);
+        await step(run, "The payment processor sends a webhook for <code>txn_A</code> to <code>POST /v1/webhooks/transactions</code>.", async () => { active("b-proc"); await wait(run, 300); active("b-proc", false); });
+        await step(run, "The API <b>validates</b> the body: all fields present, <code>amount &gt; 0</code> with at most 2 decimals, a 3-letter currency, source ≠ destination. Nothing is stored yet.", async () => { await arrive(run, p); await flash(run, "b-api"); });
+        await step(run, "The webhook is handed to <b>group commit</b>, which writes it with a single <code>INSERT … ON CONFLICT (transaction_id)</code>.", async () => { await toIntake(run, p); await flash(run, "b-intake", 400); });
+        await step(run, "The row is <b>committed</b> with status <code>PROCESSING</code>. <code>transaction_id</code> is the primary key, which is the idempotency guarantee. The table also <b>is the queue</b>: no Redis, no second write that could fail.", async () => {
+          await move(run, p, P.db, 500); await fadeOut(run, p); dbSet("txn_A", { deliveries: 1, note: "queued" }); await flash(run, "b-db");
+        });
+        await step(run, "<b>Only now</b> does the API answer <code>202 Accepted</code>. That takes about 130 ms (one DB round-trip), however heavy the processing is. If the commit had failed, the answer would be <code>503</code> so the processor retries. It is <b>never 202 unless the row is saved</b>.", () => respond(run, "202 · duplicate:false", "ok"));
+        await step(run, "The background worker <b>claims</b> the row: <code>UPDATE … FOR UPDATE SKIP LOCKED</code> with a 90 s <b>lease</b>, and <code>attempts</code> goes to 1. Many workers could run; each row goes to exactly one of them.", async () => {
+          active("b-worker"); dbSet("txn_A", { attempts: 1, note: "leased by worker-1" }); await wait(run, 600); active("b-worker", false);
+        });
+        await step(run, "It runs the simulated external call: <b>30 seconds</b> (<code>asyncio.sleep</code>, so the server stays fully responsive). Shown sped up here.", async () => {
+          clock("⏩ 30 s shown in 3 s"); await runJob(run, 0, "txn_A", 3000); clock("");
+        });
+        await step(run, "The worker writes the result with a <b>guarded</b> update (<code>WHERE status='PROCESSING' AND locked_by=me</code>): status <code>PROCESSED</code> and <code>processed_at</code> = created_at + ~30 s. <code>GET /v1/transactions/txn_A</code> now shows it.", async () => {
+          freeSlot(0); dbSet("txn_A", { status: "PROCESSED", note: "processed_at = +30 s" }); await flash(run, "b-db");
+        });
+      },
+    },
+    {
+      key: "burst", title: "Many different webhooks", sub: "group commit + bounded workers",
+      facts: {
+        proves: ["Concurrent webhooks share one DB round-trip (group commit)", "Every webhook still gets 202 fast, even with jobs already processing", "Worker concurrency is bounded; extra jobs wait safely in the table"],
+        line: "“With a cloud database every query costs ~125 ms of network. Batching concurrent inserts means 50 webhooks cost the same as 1. Measured against Supabase: 2000 webhooks, p99 272 ms.”",
+        proof: "tests/test_performance.py · scripts/load_test.py",
+      },
+      real: async (log) => {
+        const ids = Array.from({ length: 8 }, (_, i) => rid("burst" + i));
+        const rs = await Promise.all(ids.map((id) => post(body(id))));
+        rs.forEach((r) => log(r));
+        log.note(`${rs.filter((r) => r.status === 202).length}/8 got 202 · slowest ${Math.max(...rs.map((r) => r.ms)).toFixed(0)} ms (server time: ${Math.max(...rs.map((r) => +r.server || 0)).toFixed(0)} ms)`);
+      },
+      async play(run) {
+        setSlots(4, ["slot 1", "slot 2", "slot 3", "slot 4"]);
+        const ids = ["txn_1", "txn_2", "txn_3", "txn_4", "txn_5", "txn_6", "txn_7", "txn_8"];
+        const ps = ids.map((id, i) => pkt(id, "t" + i, grid(P.proc[0], i)));
+        await step(run, "Eight different webhooks arrive <b>at the same moment</b>, for example after a sale.", async () => { await flash(run, "b-proc", 400); });
+        await step(run, "Each one is validated independently. Requests are async, so none of them waits for another.", async () => {
+          await all(...ps.map((p, i) => (async () => { await wait(run, i * 90); await move(run, p, grid(P.api[0], i), 600); })()));
+          await flash(run, "b-api", 300);
+        });
+        await step(run, "They <b>gather in group commit</b>. Instead of 8 separate inserts (8 × 125 ms to a cloud DB), the next flush takes everything waiting…", async () => {
+          await all(...ps.map((p, i) => move(run, p, grid(P.intake[0], i), 500)));
+          active("b-intake");
+        });
+        await step(run, "…and writes all 8 in <b>one</b> statement: <code>INSERT … SELECT FROM unnest($1, $2, …)</code>. One round-trip, ~130 ms total.", async () => {
+          await all(...ps.map((p) => move(run, p, P.intake, 300)));
+          ps.forEach((p) => p.el.remove());
+          const sql = pkt("INSERT × 8 rows", "sql", P.intake);
+          await move(run, sql, P.db, 600); await fadeOut(run, sql); active("b-intake", false);
+          ids.forEach((id) => dbSet(id, { deliveries: 1, note: "queued" }, "")); renderDb(); await flash(run, "b-db");
+        });
+        await step(run, "All 8 get <code>202</code> as soon as that one commit finishes. Each waited about one round-trip, well inside 500 ms.", async () => {
+          await all(...ids.map((_, i) => (async () => { await wait(run, i * 60); await respond(run, "202", "ok", (i % 4) * 4); })()));
+        });
+        await step(run, "The worker has a <b>fixed number of slots</b> (100 in production, 4 here). It claims 4 jobs; the other 4 stay safely in the table as <code>PROCESSING</code> (queued).", async () => {
+          active("b-worker");
+          ids.slice(0, 4).forEach((id) => dbSet(id, { attempts: 1, note: "leased" }, ""));
+          renderDb(); await wait(run, 500); active("b-worker", false);
+        });
+        await step(run, "Jobs run in parallel. When a slot frees up, the next queued row is claimed straight away, oldest first.", async () => {
+          clock("⏩ 30 s shown in 2.5 s");
+          await all(...[0, 1, 2, 3].map((i) => runJob(run, i, ids[i], 2500)));
+          ids.slice(0, 4).forEach((id, i) => { freeSlot(i); dbSet(id, { status: "PROCESSED", note: "done" }, ""); });
+          ids.slice(4).forEach((id) => dbSet(id, { attempts: 1, note: "leased" }, "")); renderDb();
+          await all(...[0, 1, 2, 3].map((i) => runJob(run, i, ids[4 + i], 2500)));
+          ids.slice(4).forEach((id, i) => { freeSlot(i); dbSet(id, { status: "PROCESSED", note: "done" }, ""); }); renderDb(); clock("");
+        });
+        await step(run, "All 8 are <code>PROCESSED</code>, each exactly once. To go faster, add instances: <code>SKIP LOCKED</code> means two workers never take the same row.");
+      },
+    },
+    {
+      key: "dup", title: "Same webhook, sent again", sub: "idempotency (sequential)",
+      facts: {
+        proves: ["A retried webhook returns 202 (no error) with <code>duplicate:true</code>", "The duplicate only bumps a counter; status, amount and timing are untouched", "Even after PROCESSED, a duplicate never triggers reprocessing"],
+        line: "“The primary key makes the second insert a conflict, and <code>ON CONFLICT DO UPDATE</code> turns it into <code>webhook_count + 1</code>. It never re-queues, so a transaction is processed once no matter how many times it's delivered.”",
+        proof: "tests/test_idempotency.py::test_sequential_duplicates_processed_once, ::test_duplicate_after_processed_is_not_reprocessed",
+      },
+      real: async (log) => {
+        const id = rid("dup");
+        for (let i = 0; i < 3; i++) log(await post(body(id)));
+        const row = await findRow(id);
+        log.note(row ? `One row in the DB: webhook_count = ${row.webhook_count}, attempts = ${row.attempts}, status = ${row.status}` : "row not found");
+      },
+      async play(run) {
+        setSlots(1, ["worker-1"]);
+        const a = pkt("txn_A", "t0", P.proc);
+        await step(run, "<code>txn_A</code> arrives and is stored, exactly as in the single-webhook case.", async () => {
+          await arrive(run, a, 450); await toIntake(run, a, 0, 350); await move(run, a, P.db, 350); await fadeOut(run, a);
+          dbSet("txn_A", { deliveries: 1, note: "queued" }); await respond(run, "202 · duplicate:false", "ok");
+          dbSet("txn_A", { attempts: 1, note: "leased by worker-1" }, ""); slots[0] = { ...slots[0], id: "txn_A", pct: 10, label: "30 s call" }; renderSlots();
+        });
+        const b = pkt("txn_A (again)", "t0", P.proc);
+        await step(run, "The processor didn't see our 202 (network blip, timeout) and <b>retries the same webhook</b>. This is normal: processors deliver <i>at least once</i>.", () => arrive(run, b));
+        await step(run, "Same path, same <code>INSERT</code>. This time the primary key <b>already exists</b>, so Postgres takes the <code>ON CONFLICT</code> branch.", async () => { await toIntake(run, b); await move(run, b, P.db, 450); await fadeOut(run, b); });
+        await step(run, "The conflict branch only does <code>webhook_count = webhook_count + 1</code>. Status, amount, <code>created_at</code> and the worker's job are <b>untouched</b>. Nothing is queued again.", async () => {
+          dbSet("txn_A", { deliveries: 2 }, "warnflash"); await flash(run, "b-db");
+        });
+        await step(run, "The API still answers <code>202</code>, with <code>duplicate: true</code>. No error: an error would make the processor keep retrying.", () => respond(run, "202 · duplicate:true", "ok"));
+        await step(run, "The worker finishes its single job as normal.", async () => {
+          clock("⏩"); await tween(run, 1800, (k) => { slots[0].pct = 10 + k * 90; renderSlots(); }); clock("");
+          freeSlot(0); dbSet("txn_A", { status: "PROCESSED", note: "processed_at = T" });
+        });
+        const c = pkt("txn_A (3rd)", "t0", P.proc);
+        await step(run, "A third delivery comes <b>after</b> processing finished…", async () => { await arrive(run, c, 500); await toIntake(run, c, 0, 350); await move(run, c, P.db, 350); await fadeOut(run, c); });
+        await step(run, "…<code>webhook_count</code> becomes 3, but status stays <code>PROCESSED</code> and <code>processed_at</code> is <b>unchanged</b>. One transaction, processed once.", async () => {
+          dbSet("txn_A", { deliveries: 3 }, "warnflash"); await respond(run, "202 · duplicate:true", "ok");
+        });
+      },
+    },
+    {
+      key: "race", title: "Duplicates at the same instant", sub: "idempotency under concurrency",
+      facts: {
+        proves: ["Five identical webhooks at once → one row, <code>webhook_count = 5</code>", "Exactly one response says <code>duplicate:false</code>", "No race window: the database enforces uniqueness, not application code"],
+        line: "“There's no check-then-insert in Python that two requests could both pass. Uniqueness is enforced by the primary-key index, and copies in the same batch are folded before the insert.”",
+        proof: "tests/test_idempotency.py::test_concurrent_duplicates_single_row (30 at once), ::test_conflicting_payloads_in_same_batch",
+      },
+      real: async (log) => {
+        const id = rid("race");
+        const rs = await Promise.all(Array.from({ length: 10 }, () => post(body(id))));
+        rs.forEach((r) => log(r));
+        const row = await findRow(id);
+        log.note(`${rs.filter((r) => r.data && r.data.duplicate === false).length} response said duplicate:false · DB: ${row ? `1 row, webhook_count = ${row.webhook_count}` : "row not found"}`);
+      },
+      async play(run) {
+        setSlots(1, ["worker-1"]);
+        const ps = [0, 1, 2, 3, 4].map((i) => pkt("txn_B", "t1", [P.proc[0], 226 + i * 21]));
+        await step(run, "The processor fires <b>five copies of <code>txn_B</code> at the same moment</b> (parallel retries). This is the classic race condition.", () => flash(run, "b-proc", 400));
+        await step(run, "All five pass validation at the same time. A naive <i>“SELECT, and INSERT if missing”</i> would let several of them through.", async () => {
+          await all(...ps.map((p, i) => move(run, p, [P.api[0], 226 + i * 21], 550))); await flash(run, "b-api", 300);
+        });
+        await step(run, "They land in the <b>same group-commit batch</b>. Copies of one id are <b>folded</b> before the insert, into one row with <code>webhook_count = 5</code>. (Postgres can't update the same row twice in one statement, so this step is required.)", async () => {
+          await all(...ps.map((p, i) => move(run, p, [P.intake[0], 226 + i * 21], 450)));
+          active("b-intake"); await wait(run, 300);
+          await all(...ps.map((p) => move(run, p, P.intake, 450)));
+          ps.forEach((p) => p.el.remove());
+          const f = pkt("txn_B ×5 → 1 row", "sql", P.intake); await wait(run, 500);
+          await move(run, f, P.db, 550); await fadeOut(run, f); active("b-intake", false);
+        });
+        await step(run, "One row, <code>webhook_count = 5</code>. If the copies had been split across two batches, the <b>primary-key index</b> would serialize them, and the second batch would take the <code>ON CONFLICT</code> path. Same result.", async () => {
+          dbSet("txn_B", { deliveries: 5, note: "queued" }); await flash(run, "b-db");
+        });
+        await step(run, "Exactly <b>one</b> response says <code>duplicate:false</code>, and the other four say <code>duplicate:true</code>. All five are <code>202</code>.", async () => {
+          await respond(run, "202 · dup:false", "ok", 0);
+          await all(...[1, 2, 3, 4].map((i) => (async () => { await wait(run, i * 80); await respond(run, "202 · dup:true", "ok", i * 3); })()));
+        });
+        await step(run, "The worker processes it <b>once</b> (<code>attempts = 1</code>).", async () => {
+          dbSet("txn_B", { attempts: 1, note: "leased" }, ""); clock("⏩"); await runJob(run, 0, "txn_B", 1800); clock("");
+          freeSlot(0); dbSet("txn_B", { status: "PROCESSED", note: "done" });
+        });
+      },
+    },
+    {
+      key: "conflict", title: "Same id, different body", sub: "first write wins, flagged",
+      facts: {
+        proves: ["The original data is never overwritten by a later delivery", "The conflict is recorded (<code>payload_mismatch = true</code>) and logged as a WARNING", "Still <code>202</code>: the PDF asks for duplicates to be handled without errors"],
+        line: "“Same id with a different amount is suspicious: a bug or tampering upstream. We keep the first version, flag the row, and log it for investigation. Returning 409 is the alternative; I chose not to error, per the spec.”",
+        proof: "tests/test_idempotency.py::test_same_id_different_payload_keeps_original",
+      },
+      real: async (log) => {
+        const id = rid("conflict");
+        log(await post(body(id, 100)));
+        log(await post(body(id, 9999)));
+        const row = await findRow(id);
+        log.note(row ? `Stored amount = ${row.amount} (original kept) · payload_mismatch = ${row.payload_mismatch}` : "row not found");
+      },
+      async play(run) {
+        setSlots(1, ["worker-1"]);
+        const a = pkt("txn_C ₹100", "t2", P.proc);
+        await step(run, "<code>txn_C</code> arrives with <b>amount 100</b> and is stored. We keep a SHA-256 hash of the normalized body.", async () => {
+          await arrive(run, a, 450); await toIntake(run, a, 0, 350); await move(run, a, P.db, 350); await fadeOut(run, a);
+          dbSet("txn_C", { deliveries: 1, note: "₹100 · hash h1" }); await respond(run, "202 · duplicate:false", "ok");
+        });
+        const b = pkt("txn_C ₹9999", "t3", P.proc);
+        await step(run, "Later, a webhook with the <b>same id</b> but <b>amount 9999</b> arrives.", () => arrive(run, b));
+        await step(run, "It hits the primary key, so it's a duplicate. Its hash differs from the stored one.", async () => { await toIntake(run, b); await move(run, b, P.db, 450); await fadeOut(run, b); });
+        await step(run, "<b>First write wins</b>: the row keeps <b>₹100</b>. The conflict sets <code>payload_mismatch = true</code> and logs a WARNING, so someone can investigate.", async () => {
+          dbSet("txn_C", { deliveries: 2, mismatch: true, note: "₹100 kept" }, "warnflash"); await flash(run, "b-db");
+        });
+        await step(run, "The answer is still <code>202 · duplicate:true</code>. The sender gets no error, and the conflict is on record for investigation.", () => respond(run, "202 · duplicate:true", "ok"));
+        await step(run, "The worker processes <code>txn_C</code> <b>once</b>, with the <b>original ₹100</b>.", async () => {
+          dbSet("txn_C", { attempts: 1, note: "₹100 · leased" }, ""); clock("⏩"); await runJob(run, 0, "txn_C ₹100", 1800); clock("");
+          freeSlot(0); dbSet("txn_C", { status: "PROCESSED", note: "₹100 · done" });
+        });
+      },
+    },
+    {
+      key: "invalid", title: "Invalid payload", sub: "422, nothing stored",
+      facts: {
+        proves: ["Bad data is rejected before it touches the database", "<code>4xx</code> tells the processor not to retry: retrying bad data never helps", "Unknown extra fields are ignored, so new fields from the processor don't break us"],
+        line: "“Validation is the gate: <code>4xx</code> means ‘your request is wrong, don't retry’, and <code>5xx</code> means ‘our fault, retry later’. Getting that distinction right is what keeps retries useful.”",
+        proof: "tests/test_webhook_validation.py (22 invalid cases + malformed JSON, oversized body, wrong content type)",
+      },
+      real: async (log) => {
+        log(await post({ ...body(rid("bad")), amount: -5 }));
+        log(await post({ ...body(rid("bad")), currency: "RUPEE" }));
+        log(await post({ transaction_id: rid("bad"), amount: 10 }));
+        const id = rid("bad"); log(await post({ ...body(id), amount: 10.999 }));
+        const g = await get(id); logGet(log, g);
+      },
+      async play(run) {
+        const p = pkt("txn_X  amount: -5", "t4", P.proc);
+        await step(run, "A webhook arrives with <code>amount: -5</code>.", () => flash(run, "b-proc", 300));
+        await step(run, "Validation fails: <b>amount must be greater than 0</b>. The same happens for missing fields, bad currency, more than 2 decimals, malformed JSON, or an oversized body.", async () => {
+          await arrive(run, p); $("b-api").classList.add("bad"); const x = boom([P.api[0], P.api[1] - 30], "⛔"); await wait(run, 700); x.remove();
+        });
+        await step(run, "It <b>never reaches group commit or the database</b>. The table is unchanged and no job is created.", async () => { await fadeOut(run, p); await flash(run, "b-db", 400); });
+        await step(run, "The API answers <code>422</code> with the reason. A <code>4xx</code> tells the processor <b>not to retry</b>, because sending the same bad data again can't succeed.", async () => {
+          await respond(run, "422 · amount > 0", "warn"); $("b-api").classList.remove("bad");
+        });
+      },
+    },
+    {
+      key: "dbdown", title: "Database is down", sub: "503, never a false 202",
+      simOnly: "Simulation only: taking the database down isn't something to do from a button. Covered by tests/test_reliability.py::test_database_down_returns_503_fast.",
+      facts: {
+        proves: ["If the row can't be committed within 400 ms, the answer is <code>503</code>", "The processor's retry is what saves the transaction", "When the DB is back, the retry is accepted normally; if the first try did commit late, the retry is just a duplicate"],
+        line: "“The worst bug a webhook receiver can have is a 202 for something it didn't save, because the processor will never send it again. So we only say 202 after the commit; otherwise 503, and the retry plus idempotency make it safe.”",
+        proof: "tests/test_reliability.py::test_database_down_returns_503_fast",
+      },
+      async play(run) {
+        $("b-db").classList.add("down"); badge("b-db", "UNREACHABLE", "err");
+        const p = pkt("txn_E", "t5", P.proc);
+        await step(run, "The database is <b>unreachable</b> (network blip, failover, maintenance) when <code>txn_E</code> arrives.", () => flash(run, "b-proc", 300));
+        await step(run, "Validation passes, and the webhook goes to group commit, which tries to <code>INSERT</code>…", async () => { await arrive(run, p, 500); await toIntake(run, p, 0, 450); });
+        await step(run, "…the write <b>can't complete within the 400 ms budget</b>. The row is <b>not</b> saved.", async () => {
+          await move(run, p, [650, 265], 350); $("b-intake").classList.add("bad"); const x = boom([640, 240]); await wait(run, 300); await move(run, p, P.intake, 300); x.remove();
+          await fadeOut(run, p); $("b-intake").classList.remove("bad");
+        });
+        await step(run, "So the API answers <code>503 Service Unavailable</code>, <b>not 202</b>. Saying “accepted” here would lose the transaction forever, because the processor would never resend it.", () => respond(run, "503 · retry", "err"));
+        await step(run, "The processor waits and <b>retries</b> (standard for webhooks). Meanwhile the database recovers.", async () => {
+          clock("⏩ processor backoff"); await wait(run, 900); $("b-db").classList.remove("down"); badge("b-db", "BACK", "ok"); await wait(run, 600); clock("");
+        });
+        const q = pkt("txn_E (retry)", "t5", P.proc);
+        await step(run, "The retry goes through the normal path. The row is committed, and <code>202</code> comes back. (If the first attempt had committed late, this retry would simply be a duplicate.)", async () => {
+          await arrive(run, q, 450); await toIntake(run, q, 0, 350); await move(run, q, P.db, 350); await fadeOut(run, q);
+          dbSet("txn_E", { deliveries: 1, note: "queued" }); await respond(run, "202 · duplicate:false", "ok");
+        });
+      },
+    },
+    {
+      key: "crash", title: "Server crashes mid-processing", sub: "lease expiry recovers the job",
+      simOnly: "Simulation only: this kills a worker. Covered by tests/test_reliability.py::test_crashed_worker_lease_expires_and_job_recovers; also verified by hard-killing the server with 100 jobs in flight (all 100 recovered).",
+      facts: {
+        proves: ["A crash or redeploy during the 30 s doesn't lose the transaction", "The lease stops two workers running the same job while the first is alive", "Graceful shutdown (SIGTERM) releases leases at once, so there's no 90 s wait"],
+        line: "“Processing is at-least-once and the result is exactly-once. If a worker dies, its lease expires and another worker picks the job up; the guarded final UPDATE means only the lease holder can write the result. The real external call would carry <code>transaction_id</code> as its idempotency key.”",
+        proof: "tests/test_reliability.py::test_crashed_worker_lease_expires_and_job_recovers, ::test_graceful_shutdown_releases_leases",
+      },
+      async play(run) {
+        setSlots(2, ["worker-1", "worker-2"]);
+        dbSet("txn_D", { deliveries: 1, note: "queued" }, "");
+        await step(run, "<code>txn_D</code> is already stored and acknowledged with <code>202</code>. Two workers are running (two instances, or one restarting).", () => wait(run, 300));
+        await step(run, "<b>worker-1</b> claims it: <code>locked_by = worker-1</code>, <code>locked_until = now + 90 s</code>, <code>attempts = 1</code>.", async () => {
+          dbSet("txn_D", { attempts: 1, note: "lease: worker-1 · 90 s" }); slots[0] = { ...slots[0], id: "txn_D", pct: 0, label: "30 s call" }; renderSlots();
+          await tween(run, 1200, (k) => { slots[0].pct = k * 40; renderSlots(); });
+        });
+        await step(run, "💥 Halfway through the 30 s call, the server <b>crashes</b> (OOM, kill -9, power loss).", async () => {
+          slots[0] = { ...slots[0], dead: true }; renderSlots(); $("b-worker").classList.add("bad");
+          const b = boom([740, 450]); await wait(run, 900); b.remove(); $("b-worker").classList.remove("bad");
+        });
+        await step(run, "The row stays <code>PROCESSING</code>. While the lease is valid, <b>worker-2 must not take it</b>: worker-1 might only be slow, not dead. <code>SKIP LOCKED</code> plus the lease check prevent double processing.", async () => {
+          clock("⏩ lease running out");
+          await tween(run, 2600, (k) => dbSet("txn_D", { note: `lease: worker-1 · ${Math.round(90 * (1 - k))} s left` }, ""));
+          clock("");
+        });
+        await step(run, "The lease <b>expires</b>. On its next poll, worker-2 sees <code>locked_until &lt; now()</code> and <b>claims the job</b>: <code>attempts = 2</code>.", async () => {
+          dbSet("txn_D", { attempts: 2, note: "lease: worker-2 · 90 s" }); active("b-worker"); await wait(run, 400); active("b-worker", false);
+        });
+        await step(run, "worker-2 runs the call and writes <code>PROCESSED</code>. Nothing was lost. If worker-1 had come back, its final write would be rejected, because it no longer holds the lease.", async () => {
+          clock("⏩"); await runJob(run, 1, "txn_D", 2000); clock(""); freeSlot(1);
+          dbSet("txn_D", { status: "PROCESSED", note: "attempts 2 · done" }); await flash(run, "b-db");
+        });
+        await step(run, "On a <b>graceful</b> stop (deploy, SIGTERM) there's no 90 s wait: the worker hands its leases back on shutdown, and the next instance picks them up immediately.");
+      },
+    },
+  ];
+
+  // ---------------- real API calls ----------------
+  const rid = (k) => `txn_demo_${k}_${Math.random().toString(16).slice(2, 8)}`;
+  const body = (id, amount = 1500) => ({ transaction_id: id, source_account: "acc_user_789", destination_account: "acc_merchant_456", amount, currency: "INR" });
+  async function post(b) {
+    const t0 = performance.now();
+    try {
+      const r = await fetch("/v1/webhooks/transactions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
+      let data = null; try { data = await r.json(); } catch {}
+      return { kind: "POST", id: b.transaction_id, status: r.status, ms: performance.now() - t0, data, server: r.headers.get("x-process-time-ms") };
+    } catch (e) { return { kind: "POST", id: b.transaction_id, status: 0, ms: performance.now() - t0, data: { detail: String(e) } }; }
+  }
+  async function get(id) {
+    const t0 = performance.now();
+    const r = await fetch(`/v1/transactions/${encodeURIComponent(id)}`, { cache: "no-store" });
+    let data = null; try { data = await r.json(); } catch {}
+    return { status: r.status, ms: performance.now() - t0, data, id };
+  }
+  async function findRow(id) {
+    const r = await fetch("/v1/transactions?limit=200", { cache: "no-store" });
+    if (!r.ok) return null;
+    return (await r.json()).find((t) => t.transaction_id === id) || null;
+  }
+  function logGet(log, g) {
+    const d = Array.isArray(g.data) ? g.data[0] : g.data;
+    log.raw(g.status, `GET ${g.id} → ${g.status} ${d && d.status ? `status=${d.status} processed_at=${d.processed_at}` : esc(d?.detail || "")} · ${g.ms.toFixed(0)} ms`);
+  }
+  function makeLog(title) {
+    const ul = $("reallog");
+    if (ul.querySelector(".empty")) ul.innerHTML = "";
+    const add = (cls, html) => { const li = document.createElement("li"); if (cls) li.className = cls; li.innerHTML = html; ul.prepend(li); };
+    const head = document.createElement("li"); head.className = "h"; head.textContent = `${new Date().toLocaleTimeString([], { hour12: false })} · ${title}`;
+    const lines = [];
+    const fn = (r) => {
+      const d = r.data || {};
+      let detail = d.detail; if (Array.isArray(detail)) detail = detail.map((x) => `${(x.loc || []).filter((p) => p !== "body").join(".")}: ${x.msg}`).join("; ");
+      const what = r.status === 202 ? `duplicate:${d.duplicate}` : esc(detail || "");
+      lines.push([r.status, `POST ${esc(r.id)} → <b>${r.status || "ERR"}</b> ${what} · ${r.ms.toFixed(0)} ms`]);
+    };
+    fn.raw = (status, html) => lines.push([status, html]);
+    fn.note = (text) => lines.push([null, `<span style="font-family:system-ui">→ ${esc(text)}</span>`]);
+    fn.flush = () => { for (let i = lines.length - 1; i >= 0; i--) { const [s, h] = lines[i]; const cls = s == null ? "" : s >= 500 || s === 0 ? "c5" : s >= 400 ? "c4" : "c2"; add("", `<span class="${cls}">${h}</span>`); } ul.prepend(head); };
+    return fn;
+  }
+
+  // ---------------- UI wiring ----------------
+  let current = SCEN[0];
+  function renderList() {
+    $("scenlist").innerHTML = SCEN.map((s, i) => `<li><button data-k="${s.key}" class="${s === current ? "on" : ""}"><b><span class="n">${i + 1}</span>${esc(s.title)}</b><small>${esc(s.sub)}</small></button></li>`).join("");
+    $("scenlist").querySelectorAll("button").forEach((b) => (b.onclick = () => select(SCEN.find((s) => s.key === b.dataset.k), true)));
+  }
+  function renderFacts(s) {
+    $("facts").innerHTML = `<h4>What this shows</h4><ul>${s.facts.proves.map((x) => `<li>${x}</li>`).join("")}</ul>
+      <h4>Say it in the interview</h4><blockquote>${s.facts.line}</blockquote>
+      <div class="proof"><b>Verified by:</b> <code>${esc(s.facts.proof)}</code></div>`;
+    $("realrun").disabled = !s.real;
+    $("real-note").textContent = s.real ? "Sends the same requests to this server and shows the actual responses." : s.simOnly;
+  }
+  function select(s, autoplay) {
+    current = s; S.run += 1; S.paused = true; if (S.next) S.next();
+    renderList(); renderFacts(s); resetStage();
+    $("scen-title").textContent = s.title;
+    $("cap-step").textContent = "Ready";
+    $("cap-text").innerHTML = `Press <b>Play</b> to watch <b>${esc(s.title.toLowerCase())}</b>${S.step ? ", then <b>Next step</b> to advance" : ""}.`;
+    setPlayLabel();
+    if (autoplay) start();
+  }
+  async function start() {
+    const run = ++S.run; resetStage(); S.paused = false; S.pendingNext = false; setPlayLabel();
+    try {
+      await current.play(run);
+      $("cap-step").textContent = "Done"; S.paused = true; setPlayLabel(true);
+    } catch (e) { if (!(e instanceof Cancel)) console.error(e); }
+  }
+  let finished = false;
+  function setPlayLabel(done) {
+    finished = !!done;
+    $("play").textContent = done ? "▶ Replay" : S.paused ? (S.stepNo ? "▶ Resume" : "▶ Play") : "❚❚ Pause";
+  }
+  $("play").onclick = () => {
+    if (finished || (!S.stepNo && S.paused)) return start();
+    S.paused = !S.paused; setPlayLabel();
+  };
+  $("restart").onclick = () => start();
+  $("next").onclick = () => {
+    if (S.next) { S.next(); return; }
+    if (!S.stepNo || finished) { $("stepmode").checked = true; S.step = true; start(); return; }
+    S.pendingNext = true;  // animation still running: advance as soon as it finishes
+  };
+  $("stepmode").onchange = (e) => { S.step = e.target.checked; if (!S.step && S.next) S.next(); };
+  document.addEventListener("keydown", (e) => {
+    if (e.target.matches("input, textarea")) return;
+    if (e.key === "ArrowRight" || e.key === " ") { e.preventDefault(); $("next").click(); }
+  });
+  $("speed").querySelectorAll("button").forEach((b) => (b.onclick = () => {
+    S.speed = Number(b.dataset.v); $("speed").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+  }));
+  $("realrun").onclick = async () => {
+    if (!current.real) return;
+    const btn = $("realrun"); btn.disabled = true;
+    const log = makeLog(current.title);
+    try { await current.real(log); } catch (e) { log.note(`Request failed: ${e}`); }
+    log.flush(); btn.disabled = false;
+  };
+
+  // Fit the fixed 1000×560 stage to the available width.
+  const fit = () => { const w = $("stagewrap").clientWidth; const k = Math.min(1, w / 1000); stage.style.transform = `scale(${k})`; $("stagewrap").style.height = 560 * k + "px"; };
+  new ResizeObserver(fit).observe($("stagewrap")); fit();
+
+  const qsSpeed = Number(new URLSearchParams(location.search).get("speed"));
+  if (qsSpeed > 0 && qsSpeed <= 20) S.speed = qsSpeed;  // e.g. ?speed=4 for a quick rehearsal
+  $("speed").querySelectorAll("button").forEach((x) => x.classList.toggle("on", Number(x.dataset.v) === S.speed));
+  const fromHash = SCEN.find((s) => "#" + s.key === location.hash);
+  select(fromHash || SCEN[0], false);
+})();
+</script>
+</body>
+</html>

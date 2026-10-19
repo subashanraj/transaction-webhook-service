@@ -2,7 +2,7 @@
 
 Receives transaction webhooks from payment processors (Razorpay style). It acknowledges them with **202 in well under 500 ms** and processes each one **exactly once** in the background, with a simulated 30 s external call. It survives crashes, restarts and DB outages without losing transactions.
 
-**Live API:** `https://<your-service>.onrender.com`. Interactive docs are at `/docs`, and a live dashboard at `/dashboard`.
+**Live API:** `https://<your-service>.onrender.com`. Interactive docs are at `/docs`, a live dashboard at `/dashboard`, and an animated explanation at `/how-it-works`.
 
 | Endpoint | Description |
 |---|---|
@@ -11,6 +11,7 @@ Receives transaction webhooks from payment processors (Razorpay style). It ackno
 | `GET /v1/transactions/{transaction_id}` | Status → `[{…, "status":"PROCESSING" \| "PROCESSED", "created_at", "processed_at"}]` |
 | `GET /health/ready` | Extra: readiness check including the database |
 | `GET /dashboard` | Extra: **live dashboard**. Send webhooks and watch them go Queued → Processing → Processed |
+| `GET /how-it-works` | Extra: **animated walkthrough** of 8 scenarios (single, burst, duplicates, concurrent duplicates, conflicting body, invalid, DB down, crash), each with a "run it for real" button |
 | `GET /v1/transactions?limit=&status=` · `GET /v1/stats` | Extra: recent transactions and counts (used by the dashboard) |
 
 More detail:
@@ -76,7 +77,7 @@ export TEST_DATABASE_URL=postgresql://postgres@localhost:5432/webhooks_test
 pytest -v
 ```
 
-**59 tests** cover validation, idempotency (sequential, concurrent, after processed, after failed, conflicting payload), end-to-end processing, crash recovery via lease expiry, retries → `FAILED`, DB down → 503, graceful shutdown, two instances sharing one DB, HMAC signatures, and latency under load (p99 ≈ 85 ms locally with 300 jobs in flight).
+**60 tests** cover validation, idempotency (sequential, concurrent, after processed, after failed, conflicting payload), end-to-end processing, crash recovery via lease expiry, retries → `FAILED`, DB down → 503, graceful shutdown, two instances sharing one DB, HMAC signatures, and latency under load (p99 ≈ 85 ms locally with 300 jobs in flight).
 
 ## Deploy (Render + Supabase)
 
@@ -129,7 +130,7 @@ See [.env.example](.env.example). Key settings: `DATABASE_URL`, `PROCESSING_DELA
 ```
 app/main.py         routes + lifespan (pools, migrations, warm-up, batcher, worker)
 app/intake.py       group commit for webhook inserts
-app/static/         dashboard.html (no build step, no external assets)
+app/static/         dashboard.html, how-it-works.html (no build step, no external assets)
 app/worker.py       lease-based background worker
 app/repository.py   all SQL
 app/schemas.py      request validation and response shapes

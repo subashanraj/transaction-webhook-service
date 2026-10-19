@@ -12,6 +12,14 @@ async def test_dashboard_page_served(client):
     assert "Transaction Webhook Service" in r.text
 
 
+async def test_how_it_works_page_served(client):
+    r = await client.get("/how-it-works")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    assert "Run it for real" in r.text
+    assert 'href="/how-it-works"' in (await client.get("/dashboard")).text
+
+
 async def test_root_is_still_plain_health_json(client):
     r = await client.get("/")
     assert r.headers["content-type"].startswith("application/json")
@@ -65,3 +73,4 @@ async def test_swagger_has_example_body(client):
     example = spec["paths"]["/v1/webhooks/transactions"]["post"]["requestBody"]["content"]["application/json"]["example"]
     assert example["transaction_id"] == "txn_abc123def456"
     assert "/dashboard" not in spec["paths"]
+    assert "/how-it-works" not in spec["paths"]

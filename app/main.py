@@ -26,7 +26,9 @@ from app.worker import Worker
 log = logging.getLogger("app")
 
 SIGNATURE_HEADER = "X-Razorpay-Signature"
-DASHBOARD_HTML = Path(__file__).resolve().parent / "static" / "dashboard.html"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+DASHBOARD_HTML = STATIC_DIR / "dashboard.html"
+HOW_IT_WORKS_HTML = STATIC_DIR / "how-it-works.html"
 
 
 def _reject_constant(name: str):
@@ -244,6 +246,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
     async def dashboard() -> HTMLResponse:
         return HTMLResponse(DASHBOARD_HTML.read_text(encoding="utf-8"))
+
+    @app.get("/how-it-works", response_class=HTMLResponse, include_in_schema=False)
+    async def how_it_works() -> HTMLResponse:
+        return HTMLResponse(HOW_IT_WORKS_HTML.read_text(encoding="utf-8"))
 
     return app
 

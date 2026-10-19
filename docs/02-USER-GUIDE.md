@@ -14,6 +14,7 @@ Technical background is in [01-TECHNICAL-DESIGN.md](01-TECHNICAL-DESIGN.md).
 | `POST /v1/webhooks/transactions` | Receive a transaction webhook | **202** |
 | `GET /v1/transactions/{transaction_id}` | Check a transaction's status (testing) | 200 / 404 |
 | `GET /dashboard` | Live dashboard in the browser (extra) | 200 |
+| `GET /how-it-works` | Animated walkthrough of every scenario (extra) | 200 |
 | `GET /v1/transactions?limit=50&status=PROCESSING` | Recent transactions, newest first (extra) | 200 / 422 |
 | `GET /v1/stats` | Counts per status, worker load (extra) | 200 |
 
@@ -116,6 +117,27 @@ Open **`/dashboard`** (e.g. `http://127.0.0.1:8001/dashboard`). It's a single pa
 * **Table:** newest first, with filter tabs. Status is shown as **Queued** (not claimed yet), **Processing** (with a progress bar against the delay), **Processed** or **Failed** (hover for the error). **Deliveries** is how many webhooks arrived for that id; **Took** is `processed_at − created_at`. Click an id to load it into the form.
 
 `GET /` is untouched: it still returns exactly the health JSON the assessment specifies.
+
+### 2.7.1 Animated walkthrough (`/how-it-works`): for presenting
+
+An animated diagram of **Payment processor → Webhook API → Group commit → Postgres → Worker**, where packets move through the system while a caption explains each step and *why*.
+
+| # | Scenario | What it explains |
+|---|---|---|
+| 1 | One webhook | Persist first, 202 second, process later; lease; guarded final update |
+| 2 | Many different webhooks | Group commit (8 webhooks → 1 INSERT), bounded worker slots, queueing |
+| 3 | Same webhook, sent again | `ON CONFLICT` → `webhook_count + 1`, `duplicate:true`, no reprocessing even after PROCESSED |
+| 4 | Duplicates at the same instant | Why there's no race: in-batch folding plus the primary-key index |
+| 5 | Same id, different body | First write wins, `payload_mismatch` flag |
+| 6 | Invalid payload | 422, nothing stored, why 4xx vs 5xx matters |
+| 7 | Database is down | 503 rather than a false 202; the retry saves it |
+| 8 | Server crashes mid-processing | Lease expiry, re-claim by another worker, `attempts = 2` |
+
+**Presenting tips:**
+* Tick **step by step**, then press **Next step** (or the **→** / **Space** key) to advance at your own pace. A click during an animation is queued, not lost.
+* Each scenario shows **"What this shows"**, a one-sentence **"Say it in the interview"** line, and the **test that proves it**.
+* **Run it for real** sends the same requests to the server and lists the real responses, e.g. 10 parallel duplicates → exactly one `duplicate:false` and `webhook_count = 10`. Scenarios 7 and 8 are simulation-only (they'd need the DB or a worker killed) and point to their automated tests instead.
+* Deep-link a scenario: `/how-it-works#race`. Rehearse fast with `?speed=4`.
 
 ### 2.8 Debugging locally in VS Code
 
