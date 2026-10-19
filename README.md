@@ -62,6 +62,8 @@ uvicorn app.main:app --port 8000
 
 The table is created on startup (`AUTO_MIGRATE=true`). You can also run `migrations/001_init.sql` yourself.
 
+**Debug in VS Code:** open Run and Debug (`Ctrl+Shift+D`), choose **API: Supabase (.env)** or another configuration, and press F5. Send requests from `requests.http`. Details are in the [User Guide §2.7](docs/02-USER-GUIDE.md#27-debugging-locally-in-vs-code).
+
 ## Run the tests
 
 The tests are integration tests against a real Postgres, and processing is shortened to 0.5 s.

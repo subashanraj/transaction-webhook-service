@@ -93,6 +93,44 @@ The service is now at `http://localhost:8000`. Interactive API docs (Swagger) ar
 
 It runs S0, S1, S2, S3 and S6 and prints PASS/FAIL per check.
 
+### 2.7 Debugging locally in VS Code
+
+The repo ships `.vscode/launch.json`, `settings.json` and recommended extensions.
+
+1. Open the folder in VS Code and install the recommended extensions when prompted (Python, Python Debugger, REST Client).
+2. Make sure the interpreter is `.venv` (bottom-right status bar, or *Python: Select Interpreter*), then run `pip install -r requirements-dev.txt`.
+3. Open **Run and Debug** (`Ctrl+Shift+D`), pick a configuration, and press **F5**.
+
+| Configuration | What it runs | Use it for |
+|---|---|---|
+| **API: Supabase (.env)** | The real service on `http://127.0.0.1:8001`, DB from `.env`, 30 s processing | Normal debugging against the real DB |
+| **API: Supabase, fast processing (5s)** | Same, with a 5 s delay | Stepping through the worker without waiting 30 s |
+| **API: local Postgres (port 5433)** | Local DB `webhooks`, 5 s delay | Debugging without touching Supabase |
+| **API: retries demo (always fails, local Postgres)** | `SIMULATED_FAILURE_RATE=1`, 3 attempts | Watching retry → backoff → `FAILED` |
+| **Tests: current file** | `pytest` on the open test file, stops at first failure | Debugging one test (breakpoints in tests and app code) |
+| **Tests: all** | The whole suite | |
+| **Script: load test against :8001** | 200 webhooks against the debug server | Generating traffic while you debug |
+
+Then send requests from **`requests.http`** (click *Send Request* above each block), or with curl using `BASE=http://127.0.0.1:8001`. The **Testing** panel (flask icon) also lists every test with run/debug buttons.
+
+**Good breakpoints to start with:**
+
+| File / function | What you'll see |
+|---|---|
+| `app/main.py` → `receive_webhook` | Raw body, validation, the 202 / 503 decision |
+| `app/intake.py` → `_flush_loop` | How concurrent webhooks are grouped into one INSERT |
+| `app/repository.py` → `insert_batch` | Deduplication within a batch, and `inserted` vs duplicate |
+| `app/worker.py` → `_run` / `_process` | Claiming jobs, the delay, finalize / retry |
+| `app/processor.py` → `simulate_external_call` | The simulated 30 s external call |
+
+**Things to know while debugging:**
+
+* **A breakpoint pauses the whole process,** including the event loop. Other requests and the worker freeze too, and a webhook you're paused on will answer **503** when you continue, because it overran the 400 ms budget. That's expected: the "processor" would retry, and your next send is a duplicate.
+* The debug configs set `LEASE_SECONDS=600` so a long pause doesn't let a job's lease expire mid-step.
+* Jobs run in arrival order. **If the database holds a backlog** (e.g. after a load test), a new webhook waits until earlier ones finish. Check with `SELECT count(*) FROM transactions WHERE status='PROCESSING';`.
+* Port **8001** is used because 8000 is often taken by another local app. Use `127.0.0.1`, not `localhost`, on Windows (saves ~200 ms per request).
+* Only one process should listen on 8001. Stop the debugger (`Shift+F5`) before starting another configuration.
+
 Set the base URL once for all scenarios below:
 
 ```bash

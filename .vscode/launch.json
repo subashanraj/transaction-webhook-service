@@ -1,0 +1,107 @@
+{
+  // Run and Debug panel (Ctrl+Shift+D) -> pick a configuration -> F5.
+  // Port 8001 is used because 8000 is often taken by another local app.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "API: Supabase (.env)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--host", "127.0.0.1", "--port", "8001"],
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        // Pausing on a breakpoint for longer than the lease would let the job be re-claimed.
+        "LEASE_SECONDS": "600",
+        "LOG_LEVEL": "DEBUG"
+      },
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "API: Supabase, fast processing (5s)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--host", "127.0.0.1", "--port", "8001"],
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PROCESSING_DELAY_SECONDS": "5",
+        "LEASE_SECONDS": "600",
+        "POLL_INTERVAL_SECONDS": "0.5",
+        "LOG_LEVEL": "DEBUG"
+      },
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "API: local Postgres (port 5433)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--host", "127.0.0.1", "--port", "8001"],
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "DATABASE_URL": "postgresql://postgres@localhost:5433/webhooks",
+        "PROCESSING_DELAY_SECONDS": "5",
+        "LEASE_SECONDS": "600",
+        "LOG_LEVEL": "DEBUG"
+      },
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "API: retries demo (always fails, local Postgres)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--host", "127.0.0.1", "--port", "8001"],
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "DATABASE_URL": "postgresql://postgres@localhost:5433/webhooks",
+        "PROCESSING_DELAY_SECONDS": "1",
+        "LEASE_SECONDS": "600",
+        "SIMULATED_FAILURE_RATE": "1.0",
+        "MAX_ATTEMPTS": "3"
+      },
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Tests: current file",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["${file}", "-x", "-s", "-v"],
+      "env": { "TEST_DATABASE_URL": "postgresql://postgres@localhost:5433/webhooks_test" },
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Tests: all",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-v"],
+      "env": { "TEST_DATABASE_URL": "postgresql://postgres@localhost:5433/webhooks_test" },
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Script: load test against :8001",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/load_test.py",
+      "args": ["--base", "http://127.0.0.1:8001", "--count", "200", "--concurrency", "20"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}

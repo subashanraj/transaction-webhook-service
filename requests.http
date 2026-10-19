@@ -1,0 +1,45 @@
+### Click "Send Request" above each block (VS Code "REST Client" extension),
+### or copy the curl equivalents from docs/02-USER-GUIDE.md.
+@base = http://127.0.0.1:8001
+
+### Health check
+GET {{base}}/
+
+### Readiness (checks the database)
+GET {{base}}/health/ready
+
+### Send a webhook (change the id to get a new transaction)
+POST {{base}}/v1/webhooks/transactions
+Content-Type: application/json
+
+{
+  "transaction_id": "txn_debug_001",
+  "source_account": "acc_user_789",
+  "destination_account": "acc_merchant_456",
+  "amount": 1500,
+  "currency": "INR"
+}
+
+### Query its status (PROCESSING, then PROCESSED after the delay)
+GET {{base}}/v1/transactions/txn_debug_001
+
+### Duplicate with a different amount: 202, original kept, flagged
+POST {{base}}/v1/webhooks/transactions
+Content-Type: application/json
+
+{
+  "transaction_id": "txn_debug_001",
+  "source_account": "acc_user_789",
+  "destination_account": "acc_merchant_456",
+  "amount": 9999,
+  "currency": "INR"
+}
+
+### Invalid payload: 422
+POST {{base}}/v1/webhooks/transactions
+Content-Type: application/json
+
+{ "transaction_id": "txn_bad", "amount": -1 }
+
+### Unknown transaction: 404
+GET {{base}}/v1/transactions/txn_does_not_exist
