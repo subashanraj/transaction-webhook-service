@@ -11,6 +11,7 @@
     --ok: #18794e; --ok-bg: #e6f4ec; --warn: #a15c00; --warn-bg: #fdf1dc;
     --err: #c62a2f; --err-bg: #fde8e8; --idle: #59636e; --idle-bg: #eef0f3;
     --bar: #f0a020; --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    --scroll-thumb: #c4cad2; --scroll-thumb-hover: #9aa3ae;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -18,9 +19,18 @@
       --accent: #5b8cff; --accent-text: #0b0e12;
       --ok: #4cc38a; --ok-bg: #12301f; --warn: #f0b04a; --warn-bg: #33270f;
       --err: #ff6b6b; --err-bg: #3a1618; --idle: #a3acb8; --idle-bg: #232932; --bar: #f0b04a;
+      --scroll-thumb: #3a424d; --scroll-thumb-hover: #55606d;
     }
   }
   * { box-sizing: border-box; }
+
+  /* quiet grey scrollbars that follow the light/dark theme */
+  * { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: padding-box; }
+  ::-webkit-scrollbar-corner { background: transparent; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
@@ -82,10 +92,11 @@
   .tabs button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
   .live { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
   .live input { width: auto; }
-  .tablewrap { overflow-x: auto; }
+  /* the table scrolls inside its panel; the header row stays put */
+  .tablewrap { overflow: auto; max-height: max(360px, calc(100vh - 290px)); overscroll-behavior: contain; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-  th { font-size: 12px; color: var(--muted); font-weight: 560; background: var(--panel); position: sticky; top: 0; }
+  th { font-size: 12px; color: var(--muted); font-weight: 560; background: var(--panel); position: sticky; top: 0; z-index: 1; box-shadow: inset 0 -1px 0 var(--border); }
   td.id { font-family: var(--mono); font-size: 12.5px; cursor: pointer; }
   td.id:hover { color: var(--accent); }
   td.num { text-align: right; }
@@ -175,6 +186,7 @@
       <div class="tablehead">
         <h2>Recent transactions</h2>
         <label class="live"><input type="checkbox" id="live" checked aria-label="Live refresh"> live</label>
+        <label class="live">show <select id="limit" aria-label="Rows to show" style="width:auto;padding:2px 6px"><option>30</option><option>100</option><option>200</option></select></label>
         <div class="tabs" id="tabs">
           <button data-f="" class="on">All</button>
           <button data-f="PROCESSING">Pending</button>
@@ -362,7 +374,7 @@
   async function refresh() {
     if (inFlight) return; inFlight = true;
     try {
-      const q = new URLSearchParams({ limit: "30" }); if (filter) q.set("status", filter);
+      const q = new URLSearchParams({ limit: $("limit").value }); if (filter) q.set("status", filter);
       const [list, stats] = await Promise.all([
         fetch(`/v1/transactions?${q}`, { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); }),
         fetch("/v1/stats", { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); }),
@@ -382,6 +394,7 @@
     catch { $("dot-api").className = "dot err"; }
   }
 
+  $("limit").onchange = () => refresh();
   refresh(); health();
   setInterval(() => { if (!document.hidden && $("live").checked) refresh(); }, 1000);
   setInterval(() => { if (!document.hidden) health(); }, 5000);

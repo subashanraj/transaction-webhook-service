@@ -12,6 +12,7 @@
     --err: #c62a2f; --err-bg: #fde8e8; --idle: #59636e; --idle-bg: #eef0f3; --line: #c5cbd3;
     --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
     --t0: #2f6fed; --t1: #8a4fd8; --t2: #0f8a8a; --t3: #c2410c; --t4: #be185d; --t5: #4d7c0f; --t6: #0369a1; --t7: #7c5c00;
+    --scroll-thumb: #c4cad2; --scroll-thumb-hover: #9aa3ae;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -20,9 +21,18 @@
       --ok: #4cc38a; --ok-bg: #12301f; --warn: #f0b04a; --warn-bg: #33270f;
       --err: #ff6b6b; --err-bg: #3a1618; --idle: #a3acb8; --idle-bg: #232932; --line: #3a424d;
       --t0: #5b8cff; --t1: #a678f0; --t2: #2bb5b5; --t3: #f07a3c; --t4: #f0609e; --t5: #84c23a; --t6: #3aa5e0; --t7: #d6a92a;
+      --scroll-thumb: #3a424d; --scroll-thumb-hover: #55606d;
     }
   }
   * { box-sizing: border-box; }
+
+  /* quiet grey scrollbars that follow the light/dark theme */
+  * { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: padding-box; }
+  ::-webkit-scrollbar-corner { background: transparent; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 14px 24px;
