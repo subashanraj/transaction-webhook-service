@@ -2,7 +2,7 @@
 
 Receives transaction webhooks from payment processors (Razorpay style). It acknowledges them with **202 in well under 500 ms** and processes each one **exactly once** in the background, with a simulated 30 s external call. It survives crashes, restarts and DB outages without losing transactions.
 
-**Live API:** `https://<your-service>.onrender.com`. Interactive docs are at `/docs`.
+**Live API:** `https://<your-service>.onrender.com`. Interactive docs are at `/docs`, and a live dashboard at `/dashboard`.
 
 | Endpoint | Description |
 |---|---|
@@ -10,6 +10,8 @@ Receives transaction webhooks from payment processors (Razorpay style). It ackno
 | `POST /v1/webhooks/transactions` | Webhook intake → `202 {"message":"accepted","transaction_id":"…","duplicate":false}` |
 | `GET /v1/transactions/{transaction_id}` | Status → `[{…, "status":"PROCESSING" \| "PROCESSED", "created_at", "processed_at"}]` |
 | `GET /health/ready` | Extra: readiness check including the database |
+| `GET /dashboard` | Extra: **live dashboard**. Send webhooks and watch them go Queued → Processing → Processed |
+| `GET /v1/transactions?limit=&status=` · `GET /v1/stats` | Extra: recent transactions and counts (used by the dashboard) |
 
 More detail:
 - [docs/01-TECHNICAL-DESIGN.md](docs/01-TECHNICAL-DESIGN.md): architecture, data model, flows, trade-offs
@@ -62,7 +64,7 @@ uvicorn app.main:app --port 8000
 
 The table is created on startup (`AUTO_MIGRATE=true`). You can also run `migrations/001_init.sql` yourself.
 
-**Debug in VS Code:** open Run and Debug (`Ctrl+Shift+D`), choose **API: Supabase (.env)** or another configuration, and press F5. Send requests from `requests.http`. Details are in the [User Guide §2.7](docs/02-USER-GUIDE.md#27-debugging-locally-in-vs-code).
+**Debug in VS Code:** open Run and Debug (`Ctrl+Shift+D`), choose **API: Supabase (.env)** or another configuration, and press F5. Send requests from `requests.http`. Details are in the [User Guide §2.8](docs/02-USER-GUIDE.md#28-debugging-locally-in-vs-code).
 
 ## Run the tests
 
@@ -74,7 +76,7 @@ export TEST_DATABASE_URL=postgresql://postgres@localhost:5432/webhooks_test
 pytest -v
 ```
 
-**52 tests** cover validation, idempotency (sequential, concurrent, after processed, after failed, conflicting payload), end-to-end processing, crash recovery via lease expiry, retries → `FAILED`, DB down → 503, graceful shutdown, two instances sharing one DB, HMAC signatures, and latency under load (p99 ≈ 85 ms locally with 300 jobs in flight).
+**59 tests** cover validation, idempotency (sequential, concurrent, after processed, after failed, conflicting payload), end-to-end processing, crash recovery via lease expiry, retries → `FAILED`, DB down → 503, graceful shutdown, two instances sharing one DB, HMAC signatures, and latency under load (p99 ≈ 85 ms locally with 300 jobs in flight).
 
 ## Deploy (Render + Supabase)
 
@@ -127,6 +129,7 @@ See [.env.example](.env.example). Key settings: `DATABASE_URL`, `PROCESSING_DELA
 ```
 app/main.py         routes + lifespan (pools, migrations, warm-up, batcher, worker)
 app/intake.py       group commit for webhook inserts
+app/static/         dashboard.html (no build step, no external assets)
 app/worker.py       lease-based background worker
 app/repository.py   all SQL
 app/schemas.py      request validation and response shapes

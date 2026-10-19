@@ -112,3 +112,26 @@ class TransactionOut(BaseModel):
     @field_serializer("created_at", "processed_at")
     def _ts(self, v: datetime | None) -> str | None:
         return iso_utc(v)
+
+
+class TransactionSummary(TransactionOut):
+    """Dashboard view: the public fields plus processing internals."""
+
+    attempts: int
+    webhook_count: int
+    payload_mismatch: bool
+    last_error: str | None
+    started_at: datetime | None  # when the current processing attempt began
+
+    @field_serializer("started_at")
+    def _started(self, v: datetime | None) -> str | None:
+        return v.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z") if v else None
+
+
+class Stats(BaseModel):
+    server_time: str
+    counts: dict[str, int]
+    oldest_pending_at: str | None
+    processing_delay_seconds: float
+    worker_concurrency: int
+    in_flight: int

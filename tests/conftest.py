@@ -14,6 +14,7 @@ import httpx
 import pytest
 
 from app.config import Settings
+from app.db import MIGRATIONS_DIR
 from app.main import create_app
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "postgresql://postgres@localhost:5433/webhooks_test")
@@ -60,8 +61,8 @@ async def running_app(**overrides):
 @pytest.fixture
 async def db():
     conn = await asyncpg.connect(TEST_DATABASE_URL)
-    with open(os.path.join(os.path.dirname(__file__), "..", "migrations", "001_init.sql"), encoding="utf-8") as f:
-        await conn.execute(f.read())
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        await conn.execute(path.read_text(encoding="utf-8"))
     await conn.execute("TRUNCATE transactions")
     yield conn
     await conn.close()

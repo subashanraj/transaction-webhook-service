@@ -77,6 +77,23 @@ SELECT transaction_id, source_account, destination_account, amount, currency,
 FROM transactions WHERE transaction_id = $1
 """
 
+# Dashboard: most recent transactions. started_at is when the current lease was
+# taken (lease expiry minus lease length), i.e. when processing actually began.
+LIST_RECENT = """
+SELECT transaction_id, source_account, destination_account, amount, currency,
+       status, created_at, processed_at, attempts, webhook_count, payload_mismatch,
+       last_error, locked_until - make_interval(secs => $3) AS started_at
+FROM transactions
+WHERE ($2::text IS NULL OR status = $2)
+ORDER BY created_at DESC
+LIMIT $1
+"""
+
+STATS = """
+SELECT status, count(*) AS n, min(created_at) AS oldest, now() AS server_time
+FROM transactions GROUP BY status
+"""
+
 
 @dataclass(frozen=True)
 class InsertResult:
@@ -176,3 +193,15 @@ async def release_leases(pool: asyncpg.Pool, worker_id: str, transaction_ids: li
 async def get_transaction(pool: asyncpg.Pool, transaction_id: str) -> asyncpg.Record | None:
     async with pool.acquire() as conn:
         return await conn.fetchrow(GET_ONE, transaction_id)
+
+
+async def list_recent(
+    pool: asyncpg.Pool, limit: int, status: str | None, lease_seconds: float
+) -> list[asyncpg.Record]:
+    async with pool.acquire() as conn:
+        return await conn.fetch(LIST_RECENT, limit, status, float(lease_seconds))
+
+
+async def stats(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    async with pool.acquire() as conn:
+        return await conn.fetch(STATS)

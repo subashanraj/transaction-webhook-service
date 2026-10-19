@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Webhook Dashboard</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --border: #e3e6eb; --text: #1b1f24; --muted: #667080;
+    --accent: #2f6fed; --accent-text: #ffffff;
+    --ok: #18794e; --ok-bg: #e6f4ec; --warn: #a15c00; --warn-bg: #fdf1dc;
+    --err: #c62a2f; --err-bg: #fde8e8; --idle: #59636e; --idle-bg: #eef0f3;
+    --bar: #f0a020; --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --border: #2a3039; --text: #e6e9ee; --muted: #8b95a3;
+      --accent: #5b8cff; --accent-text: #0b0e12;
+      --ok: #4cc38a; --ok-bg: #12301f; --warn: #f0b04a; --warn-bg: #33270f;
+      --err: #ff6b6b; --err-bg: #3a1618; --idle: #a3acb8; --idle-bg: #232932; --bar: #f0b04a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+           padding: 14px 24px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  .health { display: flex; gap: 14px; font-size: 13px; color: var(--muted); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--idle); }
+  .dot.ok { background: var(--ok); } .dot.err { background: var(--err); }
+  header a { color: var(--accent); text-decoration: none; font-size: 13px; }
+
+  main { max-width: 1400px; margin: 0 auto; padding: 20px 24px 40px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .tile { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .tile .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .tile .value { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile .hint { color: var(--muted); font-size: 12px; }
+
+  .layout { display: grid; grid-template-columns: 360px 1fr; gap: 20px; align-items: start; }
+  .layout > * { min-width: 0; }
+  @media (max-width: 960px) { .layout { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+  .panel h2 { font-size: 14px; margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 620; }
+  .panel .body { padding: 14px 16px; }
+
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  label:first-child { margin-top: 0; }
+  input, select { width: 100%; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--border);
+                  background: var(--bg); color: var(--text); font: inherit; }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .row2 { display: grid; grid-template-columns: 1fr 100px; gap: 8px; }
+  .idrow { display: flex; gap: 6px; } .idrow input { font-family: var(--mono); font-size: 13px; }
+  button { font: inherit; border-radius: 7px; border: 1px solid var(--border); background: var(--bg);
+           color: var(--text); padding: 7px 10px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: progress; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600;
+                   width: 100%; margin-top: 14px; padding: 9px; }
+  .scenarios { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .scenarios button { font-size: 13px; text-align: left; }
+  .scenarios small { display: block; color: var(--muted); font-size: 11px; }
+
+  .log { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; font-size: 12.5px; }
+  .log li { padding: 7px 16px; border-top: 1px solid var(--border); display: grid; grid-template-columns: 58px 1fr; gap: 8px; }
+  .log li:first-child { border-top: 0; }
+  .log .t { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .log .m { word-break: break-word; }
+  .log .empty { display: block; color: var(--muted); }
+
+  .code { display: inline-block; font-family: var(--mono); font-size: 11.5px; padding: 0 6px; border-radius: 5px; margin-right: 6px; }
+  .c2 { background: var(--ok-bg); color: var(--ok); } .c4 { background: var(--warn-bg); color: var(--warn); }
+  .c5 { background: var(--err-bg); color: var(--err); }
+
+  .tablehead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+  .tablehead h2 { padding: 0; border: 0; }
+  .tabs { display: flex; gap: 4px; margin-left: auto; }
+  .tabs button { font-size: 12.5px; padding: 4px 10px; }
+  .tabs button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .live { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .live input { width: auto; }
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { font-size: 12px; color: var(--muted); font-weight: 560; background: var(--panel); position: sticky; top: 0; }
+  td.id { font-family: var(--mono); font-size: 12.5px; cursor: pointer; }
+  td.id:hover { color: var(--accent); }
+  td.num { text-align: right; }
+  tr.flash td { animation: flash 1.2s ease-out; }
+  @keyframes flash { from { background: var(--ok-bg); } to { background: transparent; } }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+  .s-QUEUED { background: var(--idle-bg); color: var(--idle); }
+  .s-PROCESSING { background: var(--warn-bg); color: var(--warn); }
+  .s-PROCESSED { background: var(--ok-bg); color: var(--ok); }
+  .s-FAILED { background: var(--err-bg); color: var(--err); }
+  .progress { width: 90px; height: 6px; border-radius: 3px; background: var(--idle-bg); overflow: hidden; display: inline-block; vertical-align: middle; }
+  .progress i { display: block; height: 100%; background: var(--bar); transition: width .9s linear; }
+  .tag { font-size: 11px; padding: 1px 6px; border-radius: 5px; background: var(--warn-bg); color: var(--warn); margin-left: 6px; }
+  .muted { color: var(--muted); }
+  .emptyrow td { text-align: center; color: var(--muted); padding: 28px; white-space: normal; }
+  .banner { display: none; margin-bottom: 16px; padding: 10px 14px; border-radius: 8px; background: var(--err-bg); color: var(--err); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Transaction Webhook Service</h1>
+    <div class="sub">Live view: webhooks are acknowledged with 202, then processed in the background</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="health">
+    <span><span class="dot" id="dot-api"></span>API</span>
+    <span><span class="dot" id="dot-db"></span>Database</span>
+    <span id="delay-info"></span>
+  </div>
+  <a href="/docs" target="_blank" rel="noopener">API docs ↗</a>
+</header>
+
+<main>
+  <div class="banner" id="banner"></div>
+
+  <section class="tiles">
+    <div class="tile"><div class="label">Queued</div><div class="value" id="t-queued">–</div><div class="hint">waiting for a worker slot</div></div>
+    <div class="tile"><div class="label">Processing now</div><div class="value" id="t-inflight">–</div><div class="hint" id="t-capacity">&nbsp;</div></div>
+    <div class="tile"><div class="label">Processed</div><div class="value" id="t-processed">–</div><div class="hint">final state, stored</div></div>
+    <div class="tile"><div class="label">Failed</div><div class="value" id="t-failed">–</div><div class="hint">after max retries</div></div>
+    <div class="tile"><div class="label">Oldest pending</div><div class="value" id="t-oldest">–</div><div class="hint">age of the queue head</div></div>
+  </section>
+
+  <div class="layout">
+    <div>
+      <section class="panel">
+        <h2>Send a webhook</h2>
+        <div class="body">
+          <form id="form" autocomplete="off">
+            <label for="f-id">transaction_id</label>
+            <div class="idrow">
+              <input id="f-id" required>
+              <button type="button" id="new-id" title="Generate a new id">New</button>
+            </div>
+            <label for="f-src">source_account</label>
+            <input id="f-src" value="acc_user_789" required>
+            <label for="f-dst">destination_account</label>
+            <input id="f-dst" value="acc_merchant_456" required>
+            <div class="row2">
+              <div><label for="f-amt">amount</label><input id="f-amt" value="1500" inputmode="decimal" required></div>
+              <div><label for="f-cur">currency</label>
+                <select id="f-cur"><option>INR</option><option>USD</option><option>EUR</option><option>GBP</option></select></div>
+            </div>
+            <button class="primary" type="submit" id="send">Send webhook</button>
+          </form>
+
+          <div class="scenarios">
+            <button data-s="dup" aria-label="Send again with the same id (duplicate)"><b>Send again</b><small>same id → duplicate</small></button>
+            <button data-s="dup10" aria-label="Send 10 duplicates at once"><b>10 duplicates</b><small>all at once</small></button>
+            <button data-s="burst" aria-label="Send a burst of 20 new webhooks"><b>Burst of 20</b><small>new ids, in parallel</small></button>
+            <button data-s="conflict" aria-label="Send the same id with a different amount"><b>Same id, new amount</b><small>original is kept</small></button>
+            <button data-s="invalid" aria-label="Send an invalid payload"><b>Invalid payload</b><small>negative amount → 422</small></button>
+            <button data-s="unknown" aria-label="Query an unknown transaction id"><b>Query unknown id</b><small>→ 404</small></button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" style="margin-top:16px">
+        <h2>Responses</h2>
+        <ul class="log" id="log"><li><span class="empty">Responses from your requests appear here.</span></li></ul>
+      </section>
+    </div>
+
+    <section class="panel">
+      <div class="tablehead">
+        <h2>Recent transactions</h2>
+        <label class="live"><input type="checkbox" id="live" checked aria-label="Live refresh"> live</label>
+        <div class="tabs" id="tabs">
+          <button data-f="" class="on">All</button>
+          <button data-f="PROCESSING">Pending</button>
+          <button data-f="PROCESSED">Processed</button>
+          <button data-f="FAILED">Failed</button>
+        </div>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr>
+            <th>Transaction</th><th class="num">Amount</th><th>Status</th>
+            <th class="num" title="Webhook deliveries received for this id">Deliveries</th>
+            <th class="num">Attempts</th><th>Received</th><th>Processed</th><th class="num">Took</th>
+          </tr></thead>
+          <tbody id="rows"><tr class="emptyrow"><td colspan="8">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const newId = () => "txn_" + Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(16).padStart(2, "0")).join("");
+
+  let filter = "";
+  let delay = 30;
+  let clockOffset = 0;               // server time − browser time, ms
+  const lastStatus = new Map();      // transaction_id → status, to flash changes
+
+  $("f-id").value = newId();
+  $("new-id").onclick = () => { $("f-id").value = newId(); };
+
+  // ---------- requests ----------
+  function body(overrides = {}) {
+    const amt = $("f-amt").value.trim();
+    return {
+      transaction_id: $("f-id").value.trim(),
+      source_account: $("f-src").value.trim(),
+      destination_account: $("f-dst").value.trim(),
+      amount: amt === "" || isNaN(Number(amt)) ? amt : Number(amt),
+      currency: $("f-cur").value,
+      ...overrides,
+    };
+  }
+
+  async function post(payload) {
+    const t0 = performance.now();
+    try {
+      const r = await fetch("/v1/webhooks/transactions", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+      const ms = performance.now() - t0;
+      let data = null; try { data = await r.json(); } catch {}
+      return { status: r.status, ms, data, server: r.headers.get("x-process-time-ms") };
+    } catch (e) {
+      return { status: 0, ms: performance.now() - t0, data: { detail: String(e) } };
+    }
+  }
+
+  function log(status, html) {
+    const ul = $("log");
+    if (ul.querySelector(".empty")) ul.innerHTML = "";
+    const li = document.createElement("li");
+    const cls = status >= 500 || status === 0 ? "c5" : status >= 400 ? "c4" : "c2";
+    const now = new Date().toLocaleTimeString([], { hour12: false });
+    li.innerHTML = `<span class="t">${now}</span><span class="m">${status !== null ? `<span class="code ${cls}">${status || "ERR"}</span>` : ""}${html}</span>`;
+    ul.prepend(li);
+    while (ul.children.length > 60) ul.lastChild.remove();
+  }
+
+  function describe(r) {
+    const d = r.data || {};
+    if (r.status === 202) return `${esc(d.transaction_id)} · ${d.duplicate ? "duplicate (already stored)" : "new, queued for processing"} · ${r.ms.toFixed(0)} ms`;
+    let detail = d.detail;
+    if (Array.isArray(detail)) detail = detail.map((x) => { const f = (x.loc || []).filter((p) => p !== "body").join("."); return f ? `${f}: ${x.msg}` : x.msg; }).join("; ");
+    return `${esc(detail || "error")} · ${r.ms.toFixed(0)} ms`;
+  }
+
+  function summarize(label, results) {
+    const codes = {};
+    results.forEach((r) => (codes[r.status] = (codes[r.status] || 0) + 1));
+    const fresh = results.filter((r) => r.status === 202 && !r.data.duplicate).length;
+    const dups = results.filter((r) => r.status === 202 && r.data.duplicate).length;
+    const max = Math.max(...results.map((r) => r.ms));
+    const codeText = Object.entries(codes).map(([c, n]) => `${n}× ${c}`).join(", ");
+    const worst = results.some((r) => r.status !== 202) ? Math.max(...results.map((r) => r.status || 500)) : 202;
+    log(worst, `<b>${esc(label)}</b>: ${codeText} · ${fresh} new, ${dups} duplicate · slowest ${max.toFixed(0)} ms`);
+  }
+
+  async function busy(btn, fn) {
+    btn.disabled = true;
+    try { await fn(); } finally { btn.disabled = false; refresh(); }
+  }
+
+  $("form").onsubmit = (e) => {
+    e.preventDefault();
+    busy($("send"), async () => { const r = await post(body()); log(r.status, describe(r)); });
+  };
+
+  const scenarios = {
+    dup: async () => { const r = await post(body()); log(r.status, describe(r)); },
+    dup10: async () => summarize(`10× ${body().transaction_id}`, await Promise.all(Array.from({ length: 10 }, () => post(body())))),
+    burst: async () => summarize("Burst of 20 new ids", await Promise.all(Array.from({ length: 20 }, (_, i) => post(body({ transaction_id: newId(), amount: 100 + i }))))),
+    conflict: async () => {
+      const b = body(); const changed = typeof b.amount === "number" ? b.amount + 1 : 9999;
+      const r = await post({ ...b, amount: changed });
+      log(r.status, describe(r) + ` · sent amount ${changed}; stored record keeps the original`);
+    },
+    invalid: async () => { const r = await post(body({ transaction_id: newId(), amount: -5 })); log(r.status, describe(r)); },
+    unknown: async () => {
+      const id = newId(); const t0 = performance.now();
+      const r = await fetch(`/v1/transactions/${id}`); let d = {}; try { d = await r.json(); } catch {}
+      log(r.status, `GET ${esc(id)} · ${esc(d.detail || "")} · ${(performance.now() - t0).toFixed(0)} ms`);
+    },
+  };
+  document.querySelectorAll("[data-s]").forEach((b) => (b.onclick = () => busy(b, scenarios[b.dataset.s])));
+
+  // ---------- live view ----------
+  document.querySelectorAll("#tabs button").forEach((b) => (b.onclick = () => {
+    document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("on", x === b));
+    filter = b.dataset.f; refresh();
+  }));
+
+  const fmtTime = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour12: false }) : "");
+  const fmtAge = (sec) => (sec < 60 ? `${Math.round(sec)} s` : sec < 3600 ? `${Math.floor(sec / 60)} m ${Math.round(sec % 60)} s` : `${(sec / 3600).toFixed(1)} h`);
+  const serverNow = () => Date.now() + clockOffset;
+
+  function statusCell(t) {
+    if (t.status === "PROCESSING" && !t.started_at) return `<span class="pill s-QUEUED">Queued</span>`;
+    if (t.status === "PROCESSING") {
+      const pct = Math.max(0, Math.min(100, ((serverNow() - new Date(t.started_at)) / 1000 / delay) * 100));
+      return `<span class="pill s-PROCESSING">Processing</span> <span class="progress"><i style="width:${pct.toFixed(0)}%"></i></span>`;
+    }
+    const err = t.status === "FAILED" && t.last_error ? ` title="${esc(t.last_error)}"` : "";
+    return `<span class="pill s-${t.status}"${err}>${t.status === "PROCESSED" ? "Processed" : "Failed"}</span>`;
+  }
+
+  function render(list) {
+    const tb = $("rows");
+    if (!list.length) {
+      tb.innerHTML = `<tr class="emptyrow"><td colspan="8">No transactions${filter ? " with this status" : " yet"}. Send a webhook to see it appear here.</td></tr>`;
+      return;
+    }
+    tb.innerHTML = list.map((t) => {
+      const prev = lastStatus.get(t.transaction_id);
+      const flash = prev && prev !== t.status ? " flash" : "";
+      const took = t.processed_at ? fmtAge((new Date(t.processed_at) - new Date(t.created_at)) / 1000) : "";
+      const amount = Number(t.amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+      return `<tr class="${flash}">
+        <td class="id" title="Click to use this id in the form">${esc(t.transaction_id)}${t.payload_mismatch ? '<span class="tag" title="A delivery with a different body was received; the original was kept">payload mismatch</span>' : ""}</td>
+        <td class="num">${esc(amount)} <span class="muted">${esc(t.currency)}</span></td>
+        <td>${statusCell(t)}</td>
+        <td class="num">${t.webhook_count}</td>
+        <td class="num">${t.attempts}</td>
+        <td>${fmtTime(t.created_at)}</td>
+        <td>${fmtTime(t.processed_at)}</td>
+        <td class="num">${took}</td>
+      </tr>`;
+    }).join("");
+    list.forEach((t) => lastStatus.set(t.transaction_id, t.status));
+    tb.querySelectorAll("td.id").forEach((td, i) => (td.onclick = () => {
+      const t = list[i];
+      $("f-id").value = t.transaction_id; $("f-src").value = t.source_account; $("f-dst").value = t.destination_account;
+      $("f-amt").value = t.amount; $("f-cur").value = t.currency;
+    }));
+  }
+
+  function renderStats(s) {
+    delay = s.processing_delay_seconds;
+    clockOffset = new Date(s.server_time) - Date.now();
+    const pending = s.counts.PROCESSING;
+    $("t-inflight").textContent = s.in_flight;
+    $("t-queued").textContent = Math.max(0, pending - s.in_flight);
+    $("t-processed").textContent = s.counts.PROCESSED;
+    $("t-failed").textContent = s.counts.FAILED;
+    $("t-capacity").textContent = `of ${s.worker_concurrency} worker slots`;
+    $("t-oldest").textContent = s.oldest_pending_at ? fmtAge((serverNow() - new Date(s.oldest_pending_at)) / 1000) : "–";
+    $("delay-info").textContent = `processing delay ${delay} s`;
+  }
+
+  let inFlight = false;
+  async function refresh() {
+    if (inFlight) return; inFlight = true;
+    try {
+      const q = new URLSearchParams({ limit: "30" }); if (filter) q.set("status", filter);
+      const [list, stats] = await Promise.all([
+        fetch(`/v1/transactions?${q}`, { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); }),
+        fetch("/v1/stats", { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); }),
+      ]);
+      renderStats(stats); render(list);
+      $("banner").style.display = "none";
+      $("dot-db").className = "dot ok";
+    } catch (e) {
+      $("banner").textContent = `Could not load data from the service (${e.message}). Retrying…`;
+      $("banner").style.display = "block";
+      $("dot-db").className = "dot err";
+    } finally { inFlight = false; }
+  }
+
+  async function health() {
+    try { const r = await fetch("/", { cache: "no-store" }); $("dot-api").className = r.ok ? "dot ok" : "dot err"; }
+    catch { $("dot-api").className = "dot err"; }
+  }
+
+  refresh(); health();
+  setInterval(() => { if (!document.hidden && $("live").checked) refresh(); }, 1000);
+  setInterval(() => { if (!document.hidden) health(); }, 5000);
+})();
+</script>
+</body>
+</html>

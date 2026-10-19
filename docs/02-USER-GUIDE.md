@@ -13,6 +13,9 @@ Technical background is in [01-TECHNICAL-DESIGN.md](01-TECHNICAL-DESIGN.md).
 | `GET /` | Health check | 200 |
 | `POST /v1/webhooks/transactions` | Receive a transaction webhook | **202** |
 | `GET /v1/transactions/{transaction_id}` | Check a transaction's status (testing) | 200 / 404 |
+| `GET /dashboard` | Live dashboard in the browser (extra) | 200 |
+| `GET /v1/transactions?limit=50&status=PROCESSING` | Recent transactions, newest first (extra) | 200 / 422 |
+| `GET /v1/stats` | Counts per status, worker load (extra) | 200 |
 
 Transaction statuses:
 
@@ -93,7 +96,28 @@ The service is now at `http://localhost:8000`. Interactive API docs (Swagger) ar
 
 It runs S0, S1, S2, S3 and S6 and prints PASS/FAIL per check.
 
-### 2.7 Debugging locally in VS Code
+### 2.7 Live dashboard
+
+Open **`/dashboard`** (e.g. `http://127.0.0.1:8001/dashboard`). It's a single page with no build step, refreshed every second.
+
+* **Tiles:** Queued (waiting for a worker slot), Processing now, Processed, Failed, and the age of the oldest pending transaction.
+* **Send a webhook:** the form is pre-filled with a random `transaction_id`, and **New** generates another. Every response is logged with its status code and latency.
+* **One-click scenarios:**
+
+  | Button | Shows | Expected |
+  |---|---|---|
+  | Send again | Idempotency | 202, `duplicate (already stored)` |
+  | 10 duplicates | Concurrent duplicates | `10× 202 · 0 new, 10 duplicate`, and **Deliveries** goes up by 10 |
+  | Burst of 20 | Performance | `20× 202`, slowest well under 500 ms |
+  | Same id, new amount | Conflicting payload | 202, the row keeps the original amount and gets a **payload mismatch** tag |
+  | Invalid payload | Validation | 422 `amount: … must be greater than 0` |
+  | Query unknown id | Not found | 404 |
+
+* **Table:** newest first, with filter tabs. Status is shown as **Queued** (not claimed yet), **Processing** (with a progress bar against the delay), **Processed** or **Failed** (hover for the error). **Deliveries** is how many webhooks arrived for that id; **Took** is `processed_at − created_at`. Click an id to load it into the form.
+
+`GET /` is untouched: it still returns exactly the health JSON the assessment specifies.
+
+### 2.8 Debugging locally in VS Code
 
 The repo ships `.vscode/launch.json`, `settings.json` and recommended extensions.
 

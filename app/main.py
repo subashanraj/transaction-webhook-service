@@ -6,9 +6,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from functools import partial
 
-from fastapi import FastAPI, HTTPException, Request
+from pathlib import Path
+from typing import Annotated, Literal
+
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import ValidationError
 
 from app import repository as repo
@@ -16,13 +19,14 @@ from app.config import Settings, get_settings
 from app.db import create_pool, keep_warm, run_migrations, warm_pool
 from app.intake import IntakeBatcher
 from app.processor import simulate_external_call
-from app.schemas import Health, TransactionOut, TransactionWebhook, WebhookAck, iso_utc
+from app.schemas import Health, Stats, TransactionOut, TransactionSummary, TransactionWebhook, WebhookAck, iso_utc
 from app.security import verify_signature
 from app.worker import Worker
 
 log = logging.getLogger("app")
 
 SIGNATURE_HEADER = "X-Razorpay-Signature"
+DASHBOARD_HTML = Path(__file__).resolve().parent / "static" / "dashboard.html"
 
 
 def _reject_constant(name: str):
@@ -114,7 +118,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_extra={
             "requestBody": {
                 "required": True,
-                "content": {"application/json": {"schema": TransactionWebhook.model_json_schema()}},
+                "content": {
+                    "application/json": {
+                        "schema": TransactionWebhook.model_json_schema(),
+                        "example": {
+                            "transaction_id": "txn_abc123def456",
+                            "source_account": "acc_user_789",
+                            "destination_account": "acc_merchant_456",
+                            "amount": 1500,
+                            "currency": "INR",
+                        },
+                    }
+                },
             }
         },
         responses={
@@ -187,6 +202,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if row is None:
             raise HTTPException(404, "transaction not found")
         return [TransactionOut(**dict(row))]
+
+    @app.get("/v1/transactions", response_model=list[TransactionSummary], tags=["dashboard"])
+    async def list_transactions(
+        request: Request,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        status: Literal["PROCESSING", "PROCESSED", "FAILED"] | None = None,
+    ) -> list[TransactionSummary]:
+        """Most recent transactions, newest first (used by the dashboard)."""
+        try:
+            rows = await repo.list_recent(request.app.state.api_pool, limit, status, settings.lease_seconds)
+        except Exception as e:
+            log.error("listing failed: %s", e)
+            raise HTTPException(503, "temporarily unavailable, retry") from None
+        return [TransactionSummary(**dict(r)) for r in rows]
+
+    @app.get("/v1/stats", response_model=Stats, tags=["dashboard"])
+    async def stats(request: Request) -> Stats:
+        """Counts per status and worker state (used by the dashboard)."""
+        try:
+            rows = await repo.stats(request.app.state.api_pool)
+        except Exception as e:
+            log.error("stats failed: %s", e)
+            raise HTTPException(503, "temporarily unavailable, retry") from None
+        counts = {s: 0 for s in ("PROCESSING", "PROCESSED", "FAILED")}
+        oldest = None
+        for r in rows:
+            counts[r["status"]] = r["n"]
+            if r["status"] == "PROCESSING":
+                oldest = r["oldest"]
+        server_now = rows[0]["server_time"] if rows else datetime.now(timezone.utc)
+        return Stats(
+            server_time=server_now.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            counts=counts,
+            oldest_pending_at=iso_utc(oldest),
+            processing_delay_seconds=settings.processing_delay_seconds,
+            worker_concurrency=settings.worker_concurrency,
+            in_flight=request.app.state.worker.in_flight,
+        )
+
+    @app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
+    async def dashboard() -> HTMLResponse:
+        return HTMLResponse(DASHBOARD_HTML.read_text(encoding="utf-8"))
 
     return app
 

@@ -234,6 +234,16 @@ Responses:
 
 ---
 
+### 5.4 Extras for the demo (not in the PDF)
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /dashboard` | Static HTML page (no build, no external assets): send webhooks, run scenarios, watch status live |
+| `GET /v1/transactions?limit=1..200&status=` | Newest first, including `attempts`, `webhook_count`, `payload_mismatch`, `last_error`, `started_at` (= lease start), using index `ix_transactions_created_at` (migration 002) |
+| `GET /v1/stats` | Counts per status, oldest pending, worker in-flight/concurrency, server time (the page uses it to correct the browser clock for progress bars) |
+
+Like the status endpoint, these are unauthenticated "for testing". In production they would sit behind auth.
+
 ## 6. Request flows (step by step)
 
 ### 6.1 Happy path — single transaction
