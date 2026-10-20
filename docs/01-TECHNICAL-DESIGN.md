@@ -1,8 +1,8 @@
 # Transaction Webhook Service — Technical Design
 
 > Assessment: Full Stack Developer — Backend Task
-> Status: Design (before implementation)
-> Stack: Python 3.11 · FastAPI · asyncpg · PostgreSQL (Supabase) · Docker · Render/Railway
+> Status: Implemented, tested (60 integration tests) and deployed
+> Stack: Python 3.11 · FastAPI · asyncpg · PostgreSQL (Supabase) · Docker · Render
 
 ---
 
@@ -49,17 +49,18 @@ Every line in the PDF, and where the design handles it.
 ## 3. Architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
     RP[Payment Processor<br/>e.g. Razorpay] -- "POST /v1/webhooks/transactions" --> API
 
     subgraph Service["FastAPI service (one container, can scale to N)"]
-        API[Webhook handler<br/>validate + INSERT] -- "wake-up signal<br/>(asyncio.Event)" --> W
+        API[Webhook handler<br/>validate] -- "submit, wait for commit" --> GC[Group commit<br/>batched INSERT]
+        API -- "wake-up signal<br/>(asyncio.Event)" --> W
         W[Background worker<br/>claim → sleep 30s → finalize]
         H[GET /  health]
         Q[GET /v1/transactions/:id]
     end
 
-    API -- "INSERT ... ON CONFLICT<br/>(one round-trip)" --> DB[(PostgreSQL<br/>Supabase<br/>transactions table)]
+    GC -- "INSERT ... ON CONFLICT<br/>(one round-trip per batch)" --> DB[(PostgreSQL<br/>Supabase<br/>transactions table)]
     W -- "claim with FOR UPDATE SKIP LOCKED<br/>finalize status" --> DB
     Q -- SELECT --> DB
     Tester[Evaluator / curl] --> H
@@ -70,7 +71,8 @@ flowchart LR
 
 | Component | Responsibility | Why |
 |---|---|---|
-| **Webhook handler** | Validate body, (optionally) verify signature, one idempotent `INSERT`, return 202, ping the worker | Keeps the hot path to ~1 DB round-trip → well under 500 ms |
+| **Webhook handler** | Validate body, (optionally) verify signature, submit to group commit, return 202 after the commit, ping the worker | Keeps the hot path to ~1 DB round-trip → well under 500 ms |
+| **Group commit** (`IntakeBatcher`) | Writes all concurrently arriving webhooks in one `INSERT … ON CONFLICT` | With a cloud DB (~125 ms per round-trip) one insert per request can't keep up with bursts |
 | **PostgreSQL table `transactions`** | Source of truth **and** the work queue | One system to operate; the insert *is* the enqueue, so "accepted but not queued" can't happen |
 | **Background worker** (asyncio task in the same process) | Claims pending rows with a **lease**, sleeps 30 s, writes `PROCESSED` | No extra infra (Redis/Celery) for a 2–3 h task, yet durable because state lives in Postgres |
 | **Sweeper** (same worker loop, every `POLL_INTERVAL`) | Re-claims rows whose lease expired (crash, restart, deploy) | This is what makes "doesn't lose transactions" true |
@@ -137,7 +139,7 @@ stateDiagram-v2
     [*] --> PROCESSING: first webhook (INSERT)
     PROCESSING --> PROCESSING: duplicate webhook (webhook_count+1, no-op)
     PROCESSING --> PROCESSING: worker crash / lease expired → re-claimed
-    PROCESSING --> PROCESSING: processing error → retry with backoff (attempts < MAX)
+    PROCESSING --> PROCESSING: processing error → retry with backoff (until MAX_ATTEMPTS)
     PROCESSING --> PROCESSED: 30s simulated call succeeded
     PROCESSING --> FAILED: attempts ≥ MAX_ATTEMPTS
     PROCESSED --> PROCESSED: duplicate webhook (no reprocessing)
@@ -257,10 +259,10 @@ sequenceDiagram
     participant W as Worker
     P->>A: POST /v1/webhooks/transactions
     A->>A: validate (Pydantic) + optional HMAC check
-    A->>D: INSERT ... ON CONFLICT DO UPDATE webhook_count+1 RETURNING (xmax=0) AS inserted
+    A->>D: batched INSERT ... ON CONFLICT DO UPDATE webhook_count+n RETURNING (xmax=0) AS inserted
     D-->>A: inserted = true
     A->>W: wake_event.set()
-    A-->>P: 202 {"duplicate": false}   (~20–80 ms)
+    A-->>P: 202 {"duplicate": false}   (about one DB round-trip)
     W->>D: claim: UPDATE ... SET locked_until=now()+lease, attempts+1 ... FOR UPDATE SKIP LOCKED RETURNING *
     D-->>W: row (lease held)
     W->>W: await asyncio.sleep(30)  (simulated external API)
@@ -296,12 +298,13 @@ RETURNING t.transaction_id, (t.xmax = 0) AS inserted, t.status, t.payload_hash;
 * Ids are **sorted** inside each batch so concurrent batches lock rows in the same order and can't deadlock.
 * The request waits at most `DB_WRITE_TIMEOUT_MS` (400 ms), then gets 503. If its batch commits after that anyway, that's the safe direction: the sender's retry is just a duplicate.
 
-### 6.2.1 Two latency traps found when testing against Supabase
+### 6.2.1 Three latency traps found when testing against Supabase
 
 | Trap | Effect | Fix |
 |---|---|---|
 | asyncpg's default **connection reset on release** (`RESET ALL; UNLISTEN *; …`) | One extra round-trip per query, so every insert cost 2 RTT (250 ms) | Custom `reset` that only rolls back an abandoned transaction (we never set session state) |
 | **Lazy / idle-closed connections** | A new TLS connection to Seoul took ~930 ms, so the first webhook after startup or a quiet spell timed out | The whole API pool is opened and **primed** (hot statement prepared) at startup; idle connections are never closed; a keepalive re-warms every 60 s |
+| **App and DB in different regions** (first deploy: Render Ohio, Supabase Seoul) | 170 ms per DB call; under 20 concurrent clients, 53 of 200 webhooks hit the 400 ms budget and got 503 | Redeployed both in **Singapore**: ~5 ms server time, 0 of 200 failed. Found by comparing `GET /` (0.5 ms) with `/health/ready` (one `SELECT 1`, 170 ms) via the `X-Process-Time-Ms` header |
 
 ### 6.3 Duplicate webhooks
 
@@ -372,10 +375,16 @@ Retry / fail:
 
 ```sql
 UPDATE transactions
-SET status = CASE WHEN attempts >= $3 THEN 'FAILED' ELSE 'PROCESSING' END,
-    next_attempt_at = now() + make_interval(secs => LEAST(300, 2 ^ attempts)),  -- exponential backoff
-    last_error = $4, locked_by = NULL, locked_until = NULL, updated_at = now()
-WHERE transaction_id = $1 AND locked_by = $2;
+SET status          = CASE WHEN attempts >= $3 THEN 'FAILED' ELSE 'PROCESSING' END,
+    -- exponential backoff: 2 s, 4 s, 8 s ... capped at RETRY_MAX_SECONDS
+    next_attempt_at = now() + make_interval(
+                          secs => LEAST($5::float8, $4::float8 * power(2, attempts - 1))),
+    last_error      = $6,
+    locked_by       = NULL,
+    locked_until    = NULL,
+    updated_at      = now()
+WHERE transaction_id = $1 AND status = 'PROCESSING' AND locked_by = $2
+RETURNING status;
 ```
 
 ### 6.5 Crash / restart / deploy mid-processing
@@ -395,7 +404,7 @@ sequenceDiagram
     W2->>D: mark PROCESSED
 ```
 
-* **Graceful shutdown (SIGTERM)**: the lifespan hook stops claiming, cancels in-flight tasks, and **releases** their leases (`locked_until = now()`), so the next instance picks them up at once rather than after the lease expires.
+* **Graceful shutdown (SIGTERM)**: the lifespan hook stops claiming, cancels in-flight tasks, and **releases** their leases (clears `locked_by`/`locked_until` and undoes the interrupted attempt), so the next instance picks them up at once rather than after the lease expires.
 * `LEASE_SECONDS` (default 90) must be > `PROCESSING_DELAY_SECONDS` (30) plus margin, or a healthy worker's job could be stolen. Enforced at startup.
 
 ### 6.6 Delivery semantics (be honest about this)
@@ -414,7 +423,7 @@ sequenceDiagram
 | Unbounded concurrency (memory, DB connections) | `WORKER_CONCURRENCY` (default 100) caps in-flight jobs. Excess rows simply wait in the table. |
 | DB connection churn | `asyncpg` API pool (10) is fully opened and primed at startup and kept warm; the worker has its own pool (5) so a busy worker can't starve the handler. |
 | Round-trip latency to a cloud DB | **Group commit** (§6.2): concurrent webhooks share one INSERT round-trip. |
-| DB latency | DB in the **same region** as the app (e.g. both in `ap-south-1` / Mumbai). Cross-region adds ~100–250 ms per round-trip. |
+| DB latency | DB in the **same region** as the app. Deployed: Render and Supabase both in **Singapore** (`ap-southeast-1`), ~1–5 ms per round-trip. Cross-region adds ~100–250 ms per round-trip (see §6.2.1). |
 | Supabase pooler quirks | Using the **transaction pooler (port 6543)** means pgbouncer, which can't use prepared statements, so set `statement_cache_size=0` in asyncpg. Or use the session pooler / direct connection (5432). |
 | Slow DB / timeouts | `wait_for(insert, 0.4s)` → 503. Fail fast and let the processor retry. |
 | Cold starts on free hosting | Free tiers that sleep (Render free) take 30–60 s to wake, which blows the 500 ms budget. Use an always-on instance (Render Starter / Railway / Fly `min_machines_running=1`). |
@@ -426,8 +435,9 @@ Measured:
 |---|---|
 | Local Postgres, 2000 webhooks, ~4000 queued | 779 req/s, p99 171 ms, all 202 |
 | **Supabase (Seoul) from India, ~125 ms RTT**, 2000 webhooks at 50 concurrent | **all 202, p50 216 ms, p99 272 ms**, zero timeouts |
+| **Live deployment** (Render + Supabase, both Singapore), 200 webhooks at 20 concurrent | **all 202, server time p50 10 ms, p99 98 ms**; smoke test 17/17 |
 
-With the app in Render Singapore (~70 ms RTT to Seoul), expect roughly half the Supabase numbers.
+On the live deployment, a single webhook takes ~5–10 ms of server time; the rest of what a client sees is network.
 
 ---
 
@@ -466,25 +476,30 @@ With the app in Render Singapore (~70 ms RTT to Seoul), expect roughly half the 
 ```
 confluence/
 ├── app/
-│   ├── main.py           # FastAPI app, routes, lifespan (pool + worker start/stop)
+│   ├── main.py           # FastAPI app, routes, lifespan (pools, migrations, warm-up, batcher, worker)
 │   ├── config.py         # pydantic-settings
-│   ├── db.py             # asyncpg pool creation
-│   ├── schemas.py        # TransactionWebhook, TransactionOut, Health
+│   ├── db.py             # asyncpg pools, warm-up/keepalive, migrations
+│   ├── schemas.py        # TransactionWebhook, TransactionOut, TransactionSummary, Stats, Health
 │   ├── intake.py         # IntakeBatcher: group commit for webhook inserts
 │   ├── repository.py     # all SQL: insert_batch, claim_batch, mark_processed, mark_retry_or_failed, get
 │   ├── worker.py         # Worker class: loop, semaphore, wake event, graceful shutdown
 │   ├── processor.py      # simulate_external_call (sleep + optional failure)
-│   └── security.py       # HMAC signature check
+│   ├── security.py       # HMAC signature check, log masking
+│   └── static/           # dashboard.html, how-it-works.html
 ├── migrations/
-│   └── 001_init.sql
+│   ├── 001_init.sql
+│   └── 002_created_at_index.sql
 ├── tests/
-│   ├── conftest.py       # test DB, DELAY=0/1
+│   ├── conftest.py       # real test Postgres, delay 0.5 s
 │   ├── test_health.py
 │   ├── test_webhook_validation.py
 │   ├── test_idempotency.py      # sequential + concurrent duplicates
 │   ├── test_processing.py       # PROCESSING → PROCESSED, timings
 │   ├── test_reliability.py      # lease expiry recovery, retries, FAILED, 503 on DB down
-│   └── test_performance.py      # latency under load
+│   ├── test_performance.py      # latency under load
+│   └── test_dashboard.py        # dashboard, walkthrough, list/stats endpoints
+├── .vscode/              # debug configurations
+├── requests.http         # ready-made requests for VS Code REST Client
 ├── render.yaml           # Render blueprint
 ├── requirements-dev.txt  # test deps
 ├── scripts/
@@ -506,14 +521,16 @@ confluence/
 
 ```mermaid
 flowchart LR
-    GH[GitHub public repo] -- auto-deploy on push --> R[Render / Railway<br/>Docker web service<br/>always-on, 1 instance]
-    R -- "DATABASE_URL (TLS)" --> S[(Supabase Postgres<br/>same region)]
+    GH[GitHub public repo] -- auto-deploy on push --> R[Render, Singapore<br/>Docker web service<br/>1 instance]
+    R -- "DATABASE_URL (TLS, session pooler)" --> S[(Supabase Postgres<br/>Singapore)]
     E[Evaluator] -- HTTPS --> R
 ```
 
-1. Create Supabase project (region near the app host), run `migrations/001_init.sql` in the SQL editor.
+Live: https://transaction-webhook-sg.onrender.com (Render and Supabase both in Singapore, so every database call stays in-region).
+
+1. Create a Supabase project **in the same region as the app host** (both are fixed at creation). The tables are created automatically at startup (`AUTO_MIGRATE=true`); you can also run `migrations/*.sql` in the SQL editor.
 2. Push repo to GitHub (public).
-3. Render → New Web Service → from repo → Docker. Set env vars. Plan: always-on (not free-sleeping).
+3. Render → New Web Service → from repo → Docker. Set `DATABASE_URL` to the Supabase **session pooler** URL (the direct `db.*` host is IPv6-only, which Render can't reach). Plan: always-on (not free-sleeping).
 4. Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1`.
    One process per container keeps behaviour simple. More capacity = more instances; `SKIP LOCKED` keeps them safe.
 5. Run `scripts/smoke_test.sh https://<service>.onrender.com`.
@@ -525,7 +542,7 @@ flowchart LR
 | Layer | What | Tooling |
 |---|---|---|
 | Unit | Validation rules, amount/currency normalisation, HMAC, serializer (2 dp, `Z` time) | pytest |
-| Integration (real Postgres) | Insert / dup / mismatch, claim with `SKIP LOCKED` across 2 workers, lease expiry, retry → FAILED | pytest + docker Postgres, `PROCESSING_DELAY_SECONDS=1` |
+| Integration (real Postgres) | Insert / dup / mismatch, claim with `SKIP LOCKED` across 2 workers, lease expiry, retry → FAILED | pytest + a real Postgres, processing delay 0.5 s |
 | API | All endpoints and status codes | `httpx.AsyncClient` + `ASGITransport` |
 | Concurrency | 50 parallel identical webhooks → 1 row, `webhook_count=50`, processed once | `asyncio.gather` |
 | Performance | 500 webhooks while 500 are processing → p99 < 500 ms | `scripts/load_test.py` |
