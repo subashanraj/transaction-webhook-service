@@ -2,7 +2,13 @@
 
 Receives transaction webhooks from payment processors (Razorpay style). It acknowledges them with **202 in well under 500 ms** and processes each one **exactly once** in the background, with a simulated 30 s external call. It survives crashes, restarts and DB outages without losing transactions.
 
-**Live API:** `https://<your-service>.onrender.com`. Interactive docs are at `/docs`, a live dashboard at `/dashboard`, and an animated explanation at `/how-it-works`.
+**Live API:** https://transaction-webhook-sg.onrender.com (Render, Singapore · Supabase Postgres, Singapore)
+
+- Swagger docs: https://transaction-webhook-sg.onrender.com/docs
+- Live dashboard: https://transaction-webhook-sg.onrender.com/dashboard
+- Animated explanation: https://transaction-webhook-sg.onrender.com/how-it-works
+
+> Hosted on Render's free plan: after ~15 minutes without traffic the first request can take up to a minute while the instance wakes up. Every request after that is fast.
 
 | Endpoint | Description |
 |---|---|
@@ -23,7 +29,7 @@ More detail:
 ## Quick test against the deployed service
 
 ```bash
-BASE=https://<your-service>.onrender.com
+BASE=https://transaction-webhook-sg.onrender.com
 
 curl -s $BASE/
 
@@ -42,7 +48,7 @@ Run all the success criteria in one go (single, duplicates, concurrent duplicate
 python scripts/load_test.py --base $BASE --count 2000 --concurrency 50
 ```
 
-Measured **against the real Supabase database** (Seoul, ~125 ms round-trip from India): **2000 webhooks, all 202, p99 272 ms, zero timeouts**. Against local Postgres: 779 req/s, p99 171 ms. A hard kill (`taskkill /F`) with 100 jobs in flight lost nothing: all 100 were re-claimed after lease expiry and finished `PROCESSED`.
+Measured **on the deployed service** (Render + Supabase, both in Singapore): **200 webhooks at 20 concurrent, all 202, server time p50 10 ms / p99 98 ms**, and the smoke test passes 17/17. Earlier, from a local machine against a distant Supabase region (~125 ms round-trip): **2000 webhooks, all 202, p99 272 ms, zero timeouts**. Against local Postgres: 779 req/s, p99 171 ms. A hard kill (`taskkill /F`) with 100 jobs in flight lost nothing: all 100 were re-claimed after lease expiry and finished `PROCESSED`.
 
 ---
 
